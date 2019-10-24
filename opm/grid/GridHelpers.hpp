@@ -34,6 +34,35 @@
 
 namespace Opm
 {
+    namespace UgGridHelpers
+    {
+	template <class Grid>
+	int numCells(const Grid& grid)
+	{
+	    return grid.size(/*codim=*/0);
+	}
+	template<class Grid>
+	const int* globalCell(const Grid& grid){
+	    return NULL;
+	}
+	template<class Grid>
+	double cellCenterDepth(const Grid& grid, int cell){
+	    return 0.0;
+	}
+	// template <class Grid>
+	// cell2Faces(const Grid&grid){
+
+	// }
+	// template <class Grid>
+	// face2Vertices(const Grid& grid){
+
+	// }
+    }
+}
+
+
+namespace Opm
+{
 namespace UgGridHelpers
 {
 
