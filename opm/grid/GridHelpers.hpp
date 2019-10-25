@@ -31,6 +31,8 @@
 #include <boost/range/iterator_range.hpp>
 #include <opm/grid/utility/platform_dependent/reenable_warnings.h>
 
+#include <opm/parser/eclipse/EclipseState/Grid/EclipseGrid.hpp>
+
 
 namespace Opm
 {
@@ -43,12 +45,73 @@ namespace Opm
 	}
 	template<class Grid>
 	const int* globalCell(const Grid& grid){
-	    return NULL;
+	    
+	    static std::vector<int> gcells;
+	    static bool firsttime=true;
+	    if(firsttime){
+		gcells.resize(grid.size(0));
+		for(int i=0; i<grid.size(0); ++i){
+		    gcells[i]=i;
+		}
+		firsttime=false;
+	    }
+	    return &gcells[0];
 	}
+	// const int* globalCell(const Grid& grid, int cell){
+	    
+	//     static std::vector<int> gcells;
+	//     static bool firsttime=true;
+	//     if(firsttime){
+	// 	gcells.resize(grid.size(0));
+	// 	for(int i=0; i<grid.size(0); ++i){
+	// 	    gcells[i]=i;
+	// 	}
+	// 	firsttime=false;
+	//     }
+	//     return &gcells[0];
+	// }
+	
 	template<class Grid>
 	double cellCenterDepth(const Grid& grid, int cell){
-	    return 0.0;
+	    static int nc=grid.size(0);
+	    static std::vector<int> depth;
+	    static bool firsttime=true;	    
+	    if(firsttime || nc != grid.size(0)){
+		const int nd = Grid::dimensionworld;
+		nc=grid.size(0);
+		depth.resize(nc);
+		const auto &gridView = grid.leafView();
+		auto elemIt = gridView.template begin</*codim=*/0>();
+		const auto& elemEndIt = gridView.template end</*codim=*/0>();
+		int lc = 0;
+		for (; elemIt != elemEndIt; ++elemIt) {
+		    const auto& elem = *elemIt;
+		    auto center  = elem.geometry().center();
+		    depth[lc] = center[nd-1];
+		    lc=lc+1;
+		}
+	    }
+	    return depth[cell];
 	}
+
+	// template<class Grid>
+	// int * cartDims(const Grid& grid){
+	//     static std::vector<int> dims(3);
+	//     return &dims[0]
+	// }
+	
+	template <class Grid>
+	EclipseGrid createEclipseGrid(const Grid& grid, const EclipseGrid& inputGrid)
+	{
+	    std::vector<int> updatedACTNUM( inputGrid.getCartesianSize( ) , 0 );
+	    const int* global_cell = UgGridHelpers::globalCell( grid );
+	    for (int c = 0; c < numCells( grid ); c++) {
+		updatedACTNUM[global_cell[c]] = 1;
+	    }		
+	    return Opm::EclipseGrid( inputGrid, inputGrid.getZCORN().data() , updatedACTNUM );
+
+	}
+	
 	// template <class Grid>
 	// cell2Faces(const Grid&grid){
 
