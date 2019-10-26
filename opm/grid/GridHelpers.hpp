@@ -94,12 +94,23 @@ namespace Opm
 	    return depth[cell];
 	}
 
-	// template<class Grid>
-	// int * cartDims(const Grid& grid){
-	//     static std::vector<int> dims(3);
-	//     return &dims[0]
-	// }
-	
+	template<class Grid>
+	int * cartDims(const Grid& grid){
+	     static std::vector<int> dims(3);
+	     return &dims[0];
+	}
+
+	template<class Grid>
+	int dimensions(const Grid& grid){
+	    return Grid::dimensionworld;
+	}
+	//also need by wellManager
+	// cell2Faces
+	// beginFaceCentroids
+	// needed for ISTELSolverEbos
+	// ::Opm::extractParallelGridInformationToISTL
+	// grid.globalCell() in aquifer model
+	// grid.**trans**
 	template <class Grid>
 	EclipseGrid createEclipseGrid(const Grid& grid, const EclipseGrid& inputGrid)
 	{
