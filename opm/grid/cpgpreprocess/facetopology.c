@@ -39,7 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdbool.h>
 #include "preprocess.h"
 #include "facetopology.h"
 
@@ -206,8 +206,10 @@ faceintersection(const int *a1, const int *a2,
 void findconnections(int n, int *pts[4],
                      int *intersectionlist,
                      int *work,
-                     struct processed_grid *out)
+                     struct processed_grid *out
+    )
 {
+    bool edge_conformal = true;
     /* vectors of point numbers for faces a(b) on pillar 1(2) */
     int *a1 = pts[0];
     int *a2 = pts[1];
@@ -226,6 +228,7 @@ void findconnections(int n, int *pts[4],
     int i,j=0;
     int intersect[4];
     int *tmp;
+    int zn;
     /* for (i=0; i<2*n; work[i++]=-1); */
 
     for (i = 0; i < 4; i++) { intersect[i] = -1; }
@@ -277,8 +280,27 @@ void findconnections(int n, int *pts[4],
                             *f++ = a2[i];
 
                             /* avoid duplicating nodes in pinched faces  */
-                            if (a2[i+1] != a2[i]) { *f++ = a2[i+1]; }
-                            if (a1[i+1] != a1[i]) { *f++ = a1[i+1]; }
+                            if (a2[i+1] != a2[i]) {
+                                if(edge_conformal){
+                                // fix edge conformal by adding all poits inbetween
+                                    for(zn = a2[i]+1; zn<=a2[i+1]; ++zn){
+                                        *f++ = zn;
+                                    }
+                                }else{
+                                    *f++ = a2[i+1]; // old not edge conformal code
+                                }
+                            }
+                            if (a1[i+1] != a1[i]) {
+                                if(edge_conformal){
+                                    // fix edge conformal by adding all poits inbetween
+                                    for(zn = a1[i+1]; zn>a1[i]; --zn){
+                                        *f++ = zn;
+                                    }
+                                }else{
+                                    *f++ = a1[i+1]; // old not edge conformal code
+                                }
+
+                            }
 
                             out->face_ptr[++out->number_of_faces] = f - out->face_nodes;
 

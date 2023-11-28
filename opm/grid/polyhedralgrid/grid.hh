@@ -1006,7 +1006,7 @@ namespace Dune
       {
         const int coordIndex = GlobalCoordinate :: dimension * seed.index();
         return copyToGlobalCoordinate( grid_.node_coordinates + coordIndex );
-      }      
+      }
       return GlobalCoordinate( 0 );
     }
 
@@ -1320,7 +1320,7 @@ namespace Dune
     }
 
   protected:
-    void init ()
+    void init (bool is_hexes = false)
     {
       // copy Cartesian dimensions
       for( int i=0; i<3; ++i )
@@ -1334,7 +1334,7 @@ namespace Dune
       cellVertices_.resize( numCells );
 
       // sort vertices such that they comply with the dune reference cube
-      if( grid_.cell_facetag )
+      if( grid_.cell_facetag && is_hexes)
       {
         typedef std::array<int, 3> KeyType;
         std::map< const KeyType, const int > vertexFaceTags;
@@ -1413,17 +1413,18 @@ namespace Dune
             }
           }
 
-          assert( int(vertexList.size()) == ( dim == 2 ? 4 : 8) );
-
+          //assert( int(vertexList.size()) == ( dim == 2 ? 4 : 8) );
+          // vertexList may have sixe != 8 if edge conformal but then it has dublicated facetags
           cellVertices_[ c ].resize( vertexList.size() );
           for( auto it = vertexList.begin(), end = vertexList.end(); it != end; ++it )
           {
             assert( (*it).second.size() == dim );
             KeyType key; key.fill( 4 ); // fill with 4 which is the first z coord
-
+            assert((*it).second.size() == 3);// may happen with pinched cells.
             std::copy( (*it).second.begin(), (*it).second.end(), key.begin() );
+            // maybe fixed ?? by looping over all sorted sets of size 3.
             auto vx = vertexFaceTags.find( key );
-            assert( vx != vertexFaceTags.end() );
+            //if( vx != vertexFaceTags.end() );
             if( vx != vertexFaceTags.end() )
             {
               if( (*vx).second >= int(cellVertices_[ c ].size()) )
@@ -1560,7 +1561,7 @@ namespace Dune
         }
 
         bool allSimplex = true ;
-        bool allCube    = true ;
+        bool allCube    = false ;// check is not sufficent
 
         for (int c = 0; c < numCells; ++c)
         {
@@ -1572,6 +1573,7 @@ namespace Dune
 
           if( nVx != 8 )
           {
+            // this check is not suffient
               allCube = false;
           }
         }
