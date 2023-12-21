@@ -47,8 +47,8 @@
 #include <opm/grid/cpgrid/OrientedEntityTable.hpp>
 #include <opm/grid/cpgpreprocess/preprocess.h>
 #include <opm/grid/utility/platform_dependent/reenable_warnings.h> //  Not really needed it seems, but alas.
-#include "common/GridEnums.hpp"   
-#include <opm/grid/utility/OpmWellType.hpp>  
+#include "common/GridEnums.hpp"
+#include <opm/grid/utility/OpmWellType.hpp>
 
 #include <iostream>
 #if ! HAVE_MPI
@@ -84,7 +84,7 @@ namespace Dune
     class IntersectionIterator;
     class IndexSet;
     class IdSet;
-    
+
     }
 }
 
@@ -254,7 +254,7 @@ namespace Dune
         friend
         void ::check_global_refine(const Dune::CpGrid&,
                                    const Dune::CpGrid&);
-        
+
     public:
 
         // --- Typedefs ---
@@ -391,7 +391,7 @@ namespace Dune
         /// Set whether we want to have unique boundary ids.
         /// \param uids if true, each boundary intersection will have a unique boundary id.
         void setUniqueBoundaryIds(bool uids);
-       
+
 
         // --- Dune interface below ---
 
@@ -402,7 +402,7 @@ namespace Dune
         /// It's the same as the class name.
         /// What did you expect, something funny?
         std::string name() const;
-        
+
         /// Return maximum level defined in this grid. Levels are 0 and 1,  maxlevel = 1 (not counting leafview), 0 = the coarsest level.
         int maxLevel() const;
 
@@ -412,7 +412,7 @@ namespace Dune
         /// one past the end on this level
         template<int codim>
         typename Traits::template Codim<codim>::LevelIterator lend (int level) const;
-        
+
         /// Iterator to first entity of given codim on level and PartitionIteratorType
         template<int codim, PartitionIteratorType PiType>
         typename Traits::template Codim<codim>::template Partition<PiType>::LevelIterator lbegin (int level) const;
@@ -426,7 +426,7 @@ namespace Dune
         /// one past the end of the sequence of leaf entities
         template<int codim>
         typename Traits::template Codim<codim>::LeafIterator leafend() const;
-        
+
         /// Iterator to first leaf entity of given codim and PartitionIteratorType
         template<int codim, PartitionIteratorType PiType>
         typename Traits::template Codim<codim>::template Partition<PiType>::LeafIterator leafbegin() const;
@@ -451,7 +451,7 @@ namespace Dune
 
         /// \brief Access to the LocalIdSet
         const Traits::LocalIdSet& localIdSet() const;
-        
+
         /// \brief Access to the LevelIndexSets
         const Traits::LevelIndexSet& levelIndexSet(int level) const;
 
@@ -488,7 +488,7 @@ namespace Dune
         ///
         /// Level0 refers to the coarse grid, assumed to be this-> data_[0]. Level1 and level2 refer to the LGRs (stored in this->data_[1]
         /// data_[2]). LeafView (stored in this-> data_[3]) is built with the level0-entities which weren't involded in the
-        /// refinenment, together with the new born entities created in level1 and level2. 
+        /// refinenment, together with the new born entities created in level1 and level2.
         /// Old-corners and old-faces (from coarse grid) lying on the boundary of the patches, get replaced by new-born-equivalent corners
         /// and new-born-faces.
         ///
@@ -576,7 +576,7 @@ namespace Dune
 
         /// \brief Size of the ghost cell layer on the leaf level
         unsigned int ghostSize(int) const;
-        
+
         /// \brief Size of the overlap on a given level
         unsigned int overlapSize(int, int) const;
 
@@ -586,8 +586,8 @@ namespace Dune
         /// \brief returns the number of boundary segments within the macro grid
         unsigned int numBoundarySegments() const;
 
-        void setZoltanParams(const std::map<std::string,std::string>& params); 
-      
+        void setZoltanParams(const std::map<std::string,std::string>& params);
+
 
         // loadbalance is not part of the grid interface therefore we skip it.
 
@@ -949,7 +949,7 @@ namespace Dune
         /// cell due the face being part of the grid boundary or the
         /// cell being stored on another process.
         int faceCell(int face, int local_index) const;
-      
+
         /// \brief Get the sum of all faces attached to all cells.
         ///
         /// Each face identified by a unique index is counted as often
@@ -975,6 +975,9 @@ namespace Dune
 
         const Vector faceAreaNormalEcl(int face) const;
 
+        const cpgrid::CpGridData* getCpGrid() const{
+            return current_view_data_;
+        }
 
         // Geometry
         /// \brief Get the Position of a vertex.
