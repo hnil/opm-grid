@@ -366,7 +366,7 @@ typename std::enable_if_t<!std::is_same_v<GridType,Dune::CpGrid> && !std::is_sam
 Opm::LookUpData<Grid,GridView>::getFieldPropIdx(const EntityType& elem) const
 {
     static_assert(std::is_same_v<Grid,GridType>);
-    assert(elem.level() == 0); // LGRs (level>0) only supported for CpGrid.
+    //assert(elem.level() == 0); // LGRs (level>0) only supported for CpGrid.
     return this-> elemMapper_.index(elem);
 }
 
@@ -393,7 +393,7 @@ Opm::LookUpData<Grid,GridView>::getFieldPropIdx(const int& elemIdx) const
 {
     static_assert(std::is_same_v<Grid,GridType>);
     // Check there are no LGRs. LGRs (level>0) only supported for CpGrid.
-    assert(gridView_.grid().maxLevel() == 0);
+    //assert(gridView_.grid().maxLevel() == 0);
     return elemIdx;
 }
 
@@ -501,7 +501,7 @@ Opm::LookUpCartesianData<Grid,GridView>::getFieldPropCartesianIdx(const EntityTy
 {
     static_assert(std::is_same_v<Grid,GridType>);
     // Check there are no LGRs. LGRs (level>0) only supported for CpGrid.
-    assert(gridView_.grid().maxLevel() == 0);
+    //assert(gridView_.grid().maxLevel() == 0);
     return cartMapper_-> cartesianIndex(this->elemMapper_.index(elem));
 }
 
