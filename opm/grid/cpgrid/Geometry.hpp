@@ -478,10 +478,11 @@ namespace Dune
                 static_assert(coorddimension == 3, "");
                 // This code is modified from dune/grid/genericgeometry/mapping.hh
                 // \todo: Implement direct computation.
-                const ctype epsilon = 1e-12;
+                const ctype epsilon = y.two_norm()*1e-12 + 1e-12;
                 auto refElement = Dune::ReferenceElements<ctype, 3>::cube();
                 LocalCoordinate x = refElement.position(0,0);
                 LocalCoordinate dx;
+                int count = 0;
                 do {
                     // DF^n dx^n = F^n, x^{n+1} -= dx^n
                     JacobianTransposed JT = jacobianTransposed(x);
@@ -489,7 +490,11 @@ namespace Dune
                     z -= y;
                     MatrixHelperType::template xTRightInvA<3, 3>(JT, z, dx );
                     x -= dx;
-                } while (dx.two_norm2() > epsilon*epsilon);
+                    count +=1;
+               } while (dx.two_norm2() > epsilon*epsilon && count < 100);
+                if(count == 100){
+                    OPM_THROW(std::runtime_error, "Global To local mapping failed");
+                }
                 return x;
             }
 
