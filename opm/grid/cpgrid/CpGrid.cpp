@@ -1191,15 +1191,16 @@ int CpGrid::faceCell(int face, int local_index, int level) const
     cpgrid::OrientedEntityTable<1,0>::row_type r
         = validLevel? data_[level]->face_to_cell_[cpgrid::EntityRep<1>(face, true)]
         : current_view_data_->face_to_cell_[cpgrid::EntityRep<1>(face, true)];
+    const bool first_is_nonexistent = r[0].index() == std::numeric_limits<int>::max();
     bool a = (local_index == 0);
-    bool b = r[0].orientation();
+    bool b = r[first_is_nonexistent ? 1 : 0].orientation();
     bool use_first = a ? b : !b;
     // The number of valid cells.
     int r_size = r.size();
     // In the case of only one valid cell, this is the index of it.
     int index = 0;
-    if(r[0].index()==std::numeric_limits<int>::max()){
-        assert(r_size==2);
+    if (r[0].index() == std::numeric_limits<int>::max()) {
+        assert(r_size == 2);
         --r_size;
         index=1;
     }
