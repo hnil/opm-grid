@@ -1628,6 +1628,8 @@ void CpGridData::computePointPartitionType()
     // type border, then the type of the point is overwritten with border. In the other cases
     // we set the type of the point to the one of the face as long as the type of the point is
     // not border.
+    // ghost should never happen;
+    std::array<Dune::PartitionType,4> type_order({InteriorEntity,OverlapEntity,BorderEntity,FrontEntity});
     partition_type_indicator_->point_indicator_.resize(geometry_.geomVector<3>().size(),
                                                        InteriorEntity);
     for(int i=0; i<face_to_point_.size(); ++i)
@@ -1637,15 +1639,50 @@ void CpGridData::computePointPartitionType()
         {
             PartitionType new_type=partition_type_indicator_->getFacePartitionType(i);
             PartitionType old_type=PartitionType(partition_type_indicator_->point_indicator_[*p]);
-            if(old_type==InteriorEntity)
-            {
-                if(new_type!=OverlapEntity)
-                    partition_type_indicator_->point_indicator_[*p]=new_type;
+            int new_order=-1;
+            int old_order=-1;
+            for(int j=0; j < 4; ++j){
+                if(new_type == type_order[j]){
+                    new_order = j;
+                }
+                if(old_type == type_order[j]){
+                    old_order = j;
+                }
             }
-            if(old_type==OverlapEntity)
-                partition_type_indicator_->point_indicator_[*p]=new_type;
-            if(old_type==FrontEntity && new_type==BorderEntity)
-                partition_type_indicator_->point_indicator_[*p]=new_type;
+            assert(new_order>=0);
+            assert(old_order>=0);
+            if(old_order== 3){//font
+                // something which is in contact with overlap or front can not be in contact with interior face
+                //assert(new_order !=0 );
+                if(new_order == 0){
+                    std::cout << "Front and Interior face at same node" << std::endl;
+                }
+                if(new_order == 2){
+                    std::cout << "Front and Border face at same node" << std::endl;
+                }
+                
+            }
+            if(old_order == 2){// border
+                //assert(new_order != 3);// a border should not be should not be in contact with front.
+                if(new_order ==3){
+                    std::cout << "Border and Front face at same node" << std::endl;
+                }
+            }
+            
+
+            if(new_order> old_order){
+                partition_type_indicator_->point_indicator_[*p]= type_order[new_order];
+            }
+            
+            // if(old_type==InteriorEntity)
+            // {
+            //     if(new_type!=OverlapEntity)
+            //         partition_type_indicator_->point_indicator_[*p]=new_type;
+            // }
+            // if(old_type==OverlapEntity)
+            //     partition_type_indicator_->point_indicator_[*p]=new_type;
+            // if(old_type==FrontEntity && new_type==BorderEntity)
+            //     partition_type_indicator_->point_indicator_[*p]=new_type;
         }
     }
 #endif

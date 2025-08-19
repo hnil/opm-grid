@@ -873,7 +873,9 @@ private:
     /** @brief The global id set (used also as local id set). */
     std::shared_ptr<LevelGlobalIdSet> global_id_set_;
     /** @brief The indicator of the partition type of the entities */
+    public:
     std::shared_ptr<PartitionTypeIndicator> partition_type_indicator_;
+    private:
     /** Mark elements to be refined **/
     std::vector<int> mark_;
     /** Level of the current CpGridData (0 when it's "GLOBAL", 1,2,.. for LGRs). */
