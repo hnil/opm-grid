@@ -83,6 +83,7 @@ class EclipseState;
 namespace Dune
 {
 class CpGrid;
+class CpGridLGR;  
 
 namespace cpgrid
 {
@@ -819,6 +820,7 @@ private:
     std::vector<std::shared_ptr<CpGridData>>* level_data_ptr_;
     // SUITABLE FOR ALL LEVELS EXCEPT FOR LEAFVIEW
     /** Map between level and leafview cell indices. Only cells (from that level) that appear in leafview count. -1 when the cell vanished.*/
+    //protected: // probably should be moded to separate class
     std::vector<int> level_to_leaf_cells_; // In entry 'level cell index', we store 'leafview cell index'
     /** Parent cells and their children. Entry is {-1, {}} when cell has no children.*/ // {level LGR, {child0, child1, ...}}
     std::vector<std::tuple<int,std::vector<int>>> parent_to_children_cells_;
@@ -882,6 +884,7 @@ private:
     }
 
     friend class Dune::CpGrid;
+    friend class Dune::CpGridLGR;
     template<int> friend class Entity;
     template<int> friend class EntityRep;
     friend class Intersection;

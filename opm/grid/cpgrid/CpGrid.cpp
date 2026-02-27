@@ -1332,6 +1332,8 @@ const std::vector< Dune :: GeometryType >& CpGrid::geomTypes( const int codim ) 
 {
     return leafIndexSet().geomTypes( codim );
 }
+
+template<int codim>  
 cpgrid::Entity<codim> CpGrid::entity( const cpgrid::Entity< codim >& seed ) const
 {
     return cpgrid::Entity<codim>( *(this->current_data_->back()), seed );

@@ -48,10 +48,10 @@ namespace Dune
     /// LGR creation and management, and related utility methods.
     class CpGridLGR : public CpGrid
     {
+      friend class cpgrid::CpGridData;
     public:
         /// Default constructor
         CpGridLGR();
-
         explicit CpGridLGR(MPIHelper::MPICommunicator comm);
 
         /// \brief  Refine the grid refCount times using the default refinement rule.

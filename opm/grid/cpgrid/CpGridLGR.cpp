@@ -51,6 +51,9 @@
 #include <numeric>
 #include <tuple>
 
+namespace{
+using AttributeSet = Dune::cpgrid::CpGridData::AttributeSet;
+}
 namespace Dune
 {
 
