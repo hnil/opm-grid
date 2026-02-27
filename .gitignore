@@ -77,3 +77,6 @@ doc/EquationNotes.pdf
 .vs
 .vscode
 _codeql_detected_source_root
+
+# Build directory
+build/
