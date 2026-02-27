@@ -1846,7 +1846,9 @@ CpGridData::refineSingleCell(const std::array<int,3>& cells_per_dim, const int& 
     for (const auto& face : parent_cell_to_face) {
         // Check face tag to identify the type of face (bottom, top, left, right, front, or back).
         const auto& parent_face_tag = (this-> face_tag_[Dune::cpgrid::EntityRep<1>(face.index(), true)]);
-        // Skip NNC faces and duplicate (tag, orientation) pairs from faulted grids.
+        // Skip NNC faces (which have no geometric counterpart in the refinement) and
+        // duplicate (tag, orientation) pairs from faulted grids (where fault-split faces
+        // create extra faces with the same tag and orientation).
         auto tagOrientPair = std::make_pair(static_cast<int>(parent_face_tag), face.orientation());
         if (parent_face_tag == face_tag::NNC_FACE ||
             processedFaceTagOrientation.count(tagOrientPair)) {
