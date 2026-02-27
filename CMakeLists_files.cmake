@@ -135,6 +135,7 @@ if(Boost_VERSION_STRING VERSION_GREATER 1.53)
     tests/cpgrid/lgr/lgrIJK_test.cpp
     tests/cpgrid/lgr/lgr_cartesian_idx_test.cpp
     tests/cpgrid/lgr/lgr_coord_zcorn_test.cpp
+    tests/cpgrid/lgr/lgr_on_faulted_grid_test.cpp
     tests/cpgrid/lgr/lgr_with_inactive_parent_cells_test.cpp
     tests/cpgrid/lgr/lookUpCellCentroid_cpgrid_test.cpp
     tests/cpgrid/lgr/lookupdataCpGrid_test.cpp

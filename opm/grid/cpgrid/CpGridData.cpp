@@ -1839,9 +1839,24 @@ CpGridData::refineSingleCell(const std::array<int,3>& cells_per_dim, const int& 
     const int& k_faces = cells_per_dim[0]*cells_per_dim[1]*(cells_per_dim[2]+1);
     const int& i_faces = (cells_per_dim[0]+1)*cells_per_dim[1]*cells_per_dim[2];
     // Populate parent_to_children_faces and child_to_parent_faces.
+    // In faulted grids, a cell may have more than 6 faces (e.g., two I+ faces due to a fault split).
+    // We track which (tag, orientation) pairs have been processed and skip duplicates to avoid
+    // creating duplicate child face mappings from the geometric refinement.
+    std::set<std::pair<int,bool>> processedFaceTagOrientation;
     for (const auto& face : parent_cell_to_face) {
         // Check face tag to identify the type of face (bottom, top, left, right, front, or back).
         const auto& parent_face_tag = (this-> face_tag_[Dune::cpgrid::EntityRep<1>(face.index(), true)]);
+        // Skip NNC faces (which have no geometric counterpart in the refinement) and
+        // duplicate (tag, orientation) pairs from faulted grids (where fault-split faces
+        // create extra faces with the same tag and orientation).
+        auto tagOrientPair = std::make_pair(static_cast<int>(parent_face_tag), face.orientation());
+        if (parent_face_tag == face_tag::NNC_FACE ||
+            processedFaceTagOrientation.count(tagOrientPair)) {
+            // Still record the face with empty children for the parent_to_children_faces mapping.
+            parent_to_children_faces.push_back(std::make_tuple(face.index(), std::vector<int>{}));
+            continue;
+        }
+        processedFaceTagOrientation.insert(tagOrientPair);
         // To store the new born faces for each face.
         std::vector<int> children_faces; // Cannot reserve/resize "now", it depends of the type of face.
         // K_FACES

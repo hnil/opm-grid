@@ -29,6 +29,7 @@
 #include <array>
 #include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -509,9 +510,9 @@ std::array<int,2> getParentFacesAssocWithNewRefinedCornLyingOnEdge(const Dune::c
     assert(newRefinedCornerLiesOnEdge(cells_per_dim, cornerIdxInLgr));
 
     const auto& parentCell_to_face = current_data.cellToFace(elemLgr);
-    if(parentCell_to_face.size()>6){
-        OPM_THROW(std::logic_error, "The associted parent cell has more than six faces. Refinment/Adaptivity not supported yet.");
-    }
+    // In faulted grids, a cell may have more than 6 faces (e.g., extra faces from fault splits).
+    // We only consider the first face per (tag, orientation) pair when searching for the 2 parent
+    // faces associated with a refined corner lying on an edge.
     // Corners Order defined in Geometry::refine  (j*(cells_per_dim[0]+1)*(cells_per_dim[2]+1)) + (i*(cells_per_dim[2]+1)) + k
     const auto& ijk = getRefinedCornerIJK(cells_per_dim, cornerIdxInLgr);
     // Edges laying on bottom face
@@ -534,38 +535,51 @@ std::array<int,2> getParentFacesAssocWithNewRefinedCornLyingOnEdge(const Dune::c
 
     std::vector<int> auxFaces;
     auxFaces.reserve(2);
+    // In faulted grids, a cell may have duplicate (tag, orientation) faces. Track which
+    // (tag, orientation) pairs have been added to avoid collecting extra faces.
+    std::set<std::pair<int,bool>> seenFaceTagOrientation;
 
     for (const auto& face : parentCell_to_face) {
         const auto& faceTag = current_data.faceTag(face.index());
+        auto tagOrientPair = std::make_pair(static_cast<int>(faceTag), face.orientation());
+        if (seenFaceTagOrientation.count(tagOrientPair)) {
+            continue;
+        }
         // Add I_FACE false
         bool addIfalse = isNewBornOnEdge02 || isNewBornOnEdge04 || isNewBornOnEdge26 || isNewBornOnEdge46;
         if( addIfalse && (faceTag == 0)  && (!face.orientation()))  {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
         // Add J_FACE false
         bool addJfalse = isNewBornOnEdge01 || isNewBornOnEdge04 || isNewBornOnEdge15 || isNewBornOnEdge45;
         if( addJfalse && (faceTag == 1)  && (!face.orientation()))  {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
         // Add K_FACE false
         bool addKfalse = isNewBornOnEdge01 ||  isNewBornOnEdge13 || isNewBornOnEdge23 || isNewBornOnEdge02;
         if( addKfalse && (faceTag == 2) && (!face.orientation())) {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
         // Add I_FACE true
         bool addItrue = isNewBornOnEdge13 || isNewBornOnEdge15 || isNewBornOnEdge37 || isNewBornOnEdge57;
         if( addItrue && (faceTag == 0)  && (face.orientation()))  {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
         // Add J_FACE true
         bool addJtrue = isNewBornOnEdge23|| isNewBornOnEdge26 || isNewBornOnEdge37 || isNewBornOnEdge67;
         if( addJtrue && (faceTag == 1)  && (face.orientation()))  {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
         // Add K_FACE true
         bool addKtrue = isNewBornOnEdge45 || isNewBornOnEdge67 || isNewBornOnEdge46 || isNewBornOnEdge57;
         if(addKtrue && (faceTag == 2) && (face.orientation())) {
             auxFaces.push_back(face.index());
+            seenFaceTagOrientation.insert(tagOrientPair);
         }
     }
     return {auxFaces[0], auxFaces[1]};
@@ -593,9 +607,8 @@ int getParentFaceWhereNewRefinedCornerLiesOn(const Dune::cpgrid::CpGridData& cur
     assert(isRefinedNewBornCornerOnLgrBoundary(cells_per_dim, cornerIdxInLgr));
 
     const auto& parentCell_to_face = current_data.cellToFace(elemLgr);
-    if(parentCell_to_face.size()>6){
-        OPM_THROW(std::logic_error, "The associted parent cell has more than six faces. Refinment/Adaptivity not supported yet.");
-    }
+    // In faulted grids, a cell may have more than 6 faces. The first-match logic below
+    // is correct since it returns the first face matching the required (tag, orientation).
     const auto& ijk = getRefinedCornerIJK(cells_per_dim, cornerIdxInLgr);
 
     bool isOnParentCell_I_FACEfalse_and_newBornCorn = ( (ijk[0] == 0) && ((ijk[1] % cells_per_dim[1] != 0) || (ijk[2] % cells_per_dim[2] !=0) ));
@@ -683,10 +696,8 @@ int replaceLgr1CornerIdxByLgr2CornerIdx(const Dune::cpgrid::CpGridData& current_
 
     const auto& ijkLgr1 = getRefinedCornerIJK(cells_per_dim_lgr1, cornerIdxLgr1);
     const auto& parentCell_to_face = current_data.cellToFace(elemLgr1);
-
-    if(parentCell_to_face.size()>6){
-        OPM_THROW(std::logic_error, "The associated parent cell has more than six faces. Refinement/Adaptivity not supported yet.");
-    }
+    // In faulted grids, a cell may have more than 6 faces. The logic below matches
+    // a specific face index (parentFaceLastAppearanceIdx), so extra faces are harmless.
 
     // Order defined in Geometry::refine
     //  (j*(cells_per_dim[0]+1)*(cells_per_dim[2]+1)) + (i*(cells_per_dim[2]+1)) + k
@@ -1164,11 +1175,8 @@ int getParentFaceWhereNewRefinedFaceLiesOn(const Dune::cpgrid::CpGridData& curre
     assert(isRefinedFaceOnLgrBoundary(cells_per_dim, faceIdxInLgr, elemLgr_ptr));
     const auto& ijk = getRefinedFaceIJK(cells_per_dim, faceIdxInLgr, elemLgr_ptr);
     const auto& parentCell_to_face = current_data.cellToFace(elemLgr);
-    // cell_to_face_ [ element ] = { I false, I true, J false, J true, K false, K true } if current leaf data is level zero
-
-    if(parentCell_to_face.size()>6){
-        OPM_THROW(std::logic_error, "The associated parent cell has more than six faces. Refinement/Adaptivity not supported yet.");
-    }
+    // In faulted grids, a cell may have more than 6 faces. The first-match logic below
+    // is correct since it returns the first face matching the required (tag, orientation).
 
     // Order defined in Geometry::refine (to be used for distinguishing if faceIdxInLgr is K, I, or J face)
     //
