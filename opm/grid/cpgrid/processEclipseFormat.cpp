@@ -429,10 +429,20 @@ namespace cpgrid
             if (edge_conformal) {
                 // Edge-conformal grids merged all removed cells geometrically;
                 // there must be no NNC bridging, and pinch handling must treat
-                // the merged columns as active gaps.
+                // the merged columns as active gaps.  Throw (not assert): under
+                // NDEBUG an assert would vanish and the unsupported NNCs would
+                // be processed silently.  Explicit NNCs also arise from
+                // numerical aquifers (AQUCON), which are therefore not usable
+                // together with edge-conformal grid processing yet.
                 pinchActive_copy = true;
-                assert(nnc_cells[PinchNNC].empty());
-                assert(nnc_cells[ExplicitNNC].empty());
+                if (!nnc_cells[PinchNNC].empty() || !nnc_cells[ExplicitNNC].empty()) {
+                    OPM_THROW(std::runtime_error,
+                              "Edge-conformal grid processing does not support "
+                              "NNCs (explicit NNC/EDITNNC keywords, or numerical "
+                              "aquifer AQUCON connections). Disable edge-conformal "
+                              "grid processing (EdgeConformal=false) or remove the "
+                              "NNC source from the deck.");
+                }
             }
             this->processEclipseFormat(g,
                                        ecl_state,
