@@ -228,10 +228,21 @@ namespace cpgrid
 
             // Add PINCH NNCs.
             std::vector<Opm::NNCdata> pinchedNNCs;
-            if (edge_conformal) {
-                // Merged (not bridged) cells: an edge-conformal grid must not
-                // produce artificial faces via MINPV NNCs.
-                assert(minpv_result.nnc.empty());
+            if (edge_conformal && !minpv_result.nnc.empty()) {
+                // The point of an edge-conformal grid is that the geometry is
+                // conforming: removed (MINPV/pinch) cells are merged into their
+                // neighbours, not bridged by an NNC.  A pinch NNC here means the
+                // processing wanted to bridge a gap it had already merged, so the
+                // grid would carry an artificial face and stop being geometric.
+                // This was an assert, i.e. absent from release builds, which is
+                // where it matters most.
+                OPM_THROW(std::runtime_error,
+                          "Edge-conformal grid processing produced "
+                              + std::to_string(minpv_result.nnc.size())
+                              + " pinch-out NNC(s): the grid is not geometrically "
+                                "conforming. Explicit deck NNCs and numerical-aquifer "
+                                "connections are fine (they add flow connections, not "
+                                "geometry); this one comes from cell removal.");
             }
 
             for (const auto& [cell1, cell2] : minpv_result.nnc) {
@@ -427,21 +438,23 @@ namespace cpgrid
             // Make the grid.
             auto pinchActive_copy = pinchActive;
             if (edge_conformal) {
-                // Edge-conformal grids merged all removed cells geometrically;
-                // there must be no NNC bridging, and pinch handling must treat
-                // the merged columns as active gaps.  Throw (not assert): under
-                // NDEBUG an assert would vanish and the unsupported NNCs would
-                // be processed silently.  Explicit NNCs also arise from
-                // numerical aquifers (AQUCON), which are therefore not usable
-                // together with edge-conformal grid processing yet.
+                // Edge-conformal grids merged all removed cells geometrically,
+                // and pinch handling must treat the merged columns as active
+                // gaps.  What must not appear is an NNC the *processing* created
+                // to bridge geometry it had already merged - that would make the
+                // grid non-geometric.  Explicit deck NNCs (NNC/EDITNNC) and
+                // numerical-aquifer AQUCON connections are a different thing:
+                // they add flow connections between cells that both exist, they
+                // do not alter the geometry, and they are allowed.
                 pinchActive_copy = true;
-                if (!nnc_cells[PinchNNC].empty() || !nnc_cells[ExplicitNNC].empty()) {
+                if (!nnc_cells[PinchNNC].empty()) {
                     OPM_THROW(std::runtime_error,
-                              "Edge-conformal grid processing does not support "
-                              "NNCs (explicit NNC/EDITNNC keywords, or numerical "
-                              "aquifer AQUCON connections). Disable edge-conformal "
-                              "grid processing (EdgeConformal=false) or remove the "
-                              "NNC source from the deck.");
+                              "Edge-conformal grid processing produced "
+                                  + std::to_string(nnc_cells[PinchNNC].size())
+                                  + " pinch-out NNC(s), so the grid is not "
+                                    "geometrically conforming. Disable edge-conformal "
+                                    "grid processing (EdgeConformal=false), or remove "
+                                    "the MINPV/pinch source of the bridging.");
                 }
             }
             this->processEclipseFormat(g,
