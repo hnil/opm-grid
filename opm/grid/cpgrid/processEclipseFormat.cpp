@@ -758,8 +758,8 @@ namespace cpgrid
     }
 
     // Faces between the same two coarse cells (or on the same side of one at
-    // the boundary) become one face: the outline of the fine faces, keeping
-    // only the nodes where it turns or that another face has as a vertex.
+    // the boundary) become one face through the patch corners, keeping the
+    // outline nodes another face has as a vertex: the corner-point face.
     std::vector<KeptFace> collapseCoarseFaces(std::vector<KeptFace> kept,
                                               const processed_grid& output)
     {
@@ -784,20 +784,6 @@ namespace cpgrid
             groups[it->second].push_back(static_cast<int>(f));
         }
 
-        const auto* xyz = output.node_coordinates;
-        const auto turns = [xyz](int a, int p, int b) {
-            double d1[3], d2[3];
-            for (int d = 0; d < 3; ++d) {
-                d1[d] = xyz[3*p + d] - xyz[3*a + d];
-                d2[d] = xyz[3*b + d] - xyz[3*p + d];
-            }
-            const double c[3] = {d1[1]*d2[2] - d1[2]*d2[1], d1[2]*d2[0] - d1[0]*d2[2],
-                                 d1[0]*d2[1] - d1[1]*d2[0]};
-            const double n1 = d1[0]*d1[0] + d1[1]*d1[1] + d1[2]*d1[2];
-            const double n2 = d2[0]*d2[0] + d2[1]*d2[1] + d2[2]*d2[2];
-            return c[0]*c[0] + c[1]*c[1] + c[2]*c[2] > 1e-18 * n1 * n2;
-        };
-
         std::vector<std::optional<std::vector<int>>> outline(groups.size());
         std::set<int> keep;   // nodes some final face has as a vertex
         for (std::size_t g = 0; g < groups.size(); ++g) {
@@ -809,11 +795,17 @@ namespace cpgrid
                 outline[g] = patchOutline(faces);
             }
             if (outline[g]) {
-                const auto& loop = *outline[g];
-                for (std::size_t i = 0; i < loop.size(); ++i) {
-                    if (turns(loop[(i + loop.size() - 1) % loop.size()], loop[i],
-                              loop[(i + 1) % loop.size()])) {
-                        keep.insert(loop[i]);
+                // A node on two of the patch's faces lies along a side of it; the
+                // corner-point face through the patch corners does not have it.
+                std::map<int,int> uses;
+                for (const int f : groups[g]) {
+                    for (const int n : kept[f].nodes) {
+                        ++uses[n];
+                    }
+                }
+                for (const int n : *outline[g]) {
+                    if (uses[n] != 2) {
+                        keep.insert(n);
                     }
                 }
             } else {
@@ -857,7 +849,9 @@ namespace cpgrid
 
         processed_grid output{};
         free_processed_grid(&output);
-        const int process_ok = process_grdecl(/* pinchActive = */ 0,
+        // As the flow grid's edge-conformal processing: cells on either side of
+        // a zero-thickness (MINPV-merged) cell touch.
+        const int process_ok = process_grdecl(/* pinchActive = */ static_cast<int>(edge_conformal),
                                               static_cast<int>(edge_conformal),
                                               /* tolerance_unique_points = */ 0.0,
                                               &input_data,
@@ -1001,21 +995,24 @@ namespace cpgrid
         geomGrid.number_of_faces = static_cast<int>(geomFacePtr.size()) - 1;
 
         // A block is a box, so its eight corners are the outer corners of the
-        // cells at its corners.
+        // cells at its corners. A corner cell of zero thickness is not in the
+        // grid; the next one inward along the column has the same corner.
         cell_to_point_.assign(numCoarse, std::array<int,8>{});
         for (int c = 0; c < numCoarse; ++c) {
             const auto& box = blockBox[blockOfCoarse[c]];
             for (int dk = 0; dk < 2; ++dk) {
                 for (int dj = 0; dj < 2; ++dj) {
                     for (int di = 0; di < 2; ++di) {
-                        const int corner = localOfCartesian[cartesian(di ? box[3] : box[0],
-                                                                      dj ? box[4] : box[1],
-                                                                      dk ? box[5] : box[2])];
+                        int corner = -1;
+                        for (int n = 0; n <= box[5] - box[2] && corner < 0; ++n) {
+                            corner = localOfCartesian[cartesian(di ? box[3] : box[0],
+                                                                dj ? box[4] : box[1],
+                                                                dk ? box[5] - n : box[2] + n)];
+                        }
                         if (corner < 0) {
                             OPM_THROW(std::runtime_error,
-                                      "Coarsening: the cell at a block's corner is not in the "
-                                      "grid, so the block has no eight corners. Blocks must be "
-                                      "boxes of cells that all exist.");
+                                      "Coarsening: no cell of a block's corner column is in the "
+                                      "grid, so the block has no eight corners.");
                         }
                         const int node = newNode[fine_c2p[corner][4*dk + 2*dj + di]];
                         if (node < 0) {
