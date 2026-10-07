@@ -318,9 +318,21 @@ void findconnections(bool edge_conformal,
                             *f++ = a1[i];
                             *f++ = a2[i];
 
+                            /* edge-conformal: the pillar nodes between the
+                             * corners, which other columns have */
+                            if (edge_conformal) {
+                                int zn;
+                                for (zn = a2[i] + 1; zn < a2[i+1]; ++zn) { *f++ = zn; }
+                            }
+
                             /* avoid duplicating nodes in pinched faces  */
                             if (a2[i+1] != a2[i]) { *f++ = a2[i+1]; }
                             if (a1[i+1] != a1[i]) { *f++ = a1[i+1]; }
+
+                            if (edge_conformal) {
+                                int zn;
+                                for (zn = a1[i+1] - 1; zn > a1[i]; --zn) { *f++ = zn; }
+                            }
 
                             out->face_node_ptr[++out->number_of_faces] = f - out->face_nodes;
 

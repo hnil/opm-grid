@@ -111,6 +111,10 @@ std::string GeometricCheck::summary(const int maxListed) const
     item(nonPositiveCells, "cells without positive volume");
     item(openCells, "cells whose faces do not close");
     item(nonConformingCells, "cells with a face edge no other face shares (hanging node)");
+    if (!unpairedEdges.empty()) {
+        os << "e.g. edge (" << unpairedEdges.front().first << ")-(" << unpairedEdges.front().second
+           << "); ";
+    }
     item(misorientedFaces, "faces with node order against their normal");
     item(unpairedBoundaryEdges, "unpaired boundary edges");
     if (boundaries.size() > 1) {
@@ -170,10 +174,17 @@ GeometricCheck checkGeometric(const CpGrid& grid, const double tolerance)
         if (closure.two_norm() > tolerance*surface) {
             ++check.openCells;
         }
-        const bool conforming = std::all_of(edges.begin(), edges.end(), [&edges](const auto& e) {
-            const auto reverse = edges.find((e.first << 32) | (e.first >> 32));
-            return e.second == 1 && reverse != edges.end() && reverse->second == 1;
-        });
+        bool conforming = true;
+        for (const auto& [key, count] : edges) {
+            const auto reverse = edges.find((key << 32) | (key >> 32));
+            if (count != 1 || reverse == edges.end() || reverse->second != 1) {
+                conforming = false;
+                if (check.unpairedEdges.size() < 10) {
+                    check.unpairedEdges.emplace_back(grid.vertexPosition(static_cast<int>(key >> 32)),
+                                                     grid.vertexPosition(static_cast<int>(key & 0xffffffffu)));
+                }
+            }
+        }
         check.nonConformingCells += conforming ? 0 : 1;
     }
 

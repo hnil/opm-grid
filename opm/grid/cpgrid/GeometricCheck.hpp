@@ -22,6 +22,7 @@
 #include <dune/common/fvector.hh>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Dune { class CpGrid; }
@@ -51,6 +52,8 @@ struct GeometricCheck
     int misorientedFaces{0};         // node order against the stored normal
     int unpairedBoundaryEdges{0};
     std::vector<Surface> boundaries; // outer surface first, then voids and cracks
+    /// The first few unpaired cell edges, as end points (where hanging nodes are).
+    std::vector<std::pair<FieldVector<double,3>, FieldVector<double,3>>> unpairedEdges;
 
     bool ok() const;
     std::string summary(int maxListed = 5) const;
