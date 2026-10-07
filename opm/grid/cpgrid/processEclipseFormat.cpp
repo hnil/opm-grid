@@ -140,7 +140,8 @@ namespace cpgrid
                                      const bool turn_normals,
                                      const bool clip_z,
                                      const bool pinchActive,
-                                     const bool edge_conformal)
+                                     const bool edge_conformal,
+                                     const double merge_tolerance)
     {
         if (ccobj_.rank() != 0) {
             if (ecl_state != nullptr) {
@@ -200,7 +201,11 @@ namespace cpgrid
                 for (size_t i = 0; i < cartGridSize; ++i) {
                     thickness[i] = ecl_grid.getCellThickness(i);
                 }
-                const double z_tolerance = ecl_grid.isPinchActive() ?  ecl_grid.getPinchThresholdThickness() : 0.0;
+                const double pinch_tolerance = ecl_grid.isPinchActive() ?  ecl_grid.getPinchThresholdThickness() : 0.0;
+                // Every cell thinner than the merge tolerance is merged away,
+                // so no cell kept can collapse when its pillar points merge.
+                const double z_tolerance = edge_conformal ? std::max(pinch_tolerance, merge_tolerance)
+                                                          : pinch_tolerance;
                 const bool nogap = !pinchActive || ecl_grid.getPinchGapMode() ==  Opm::PinchMode::NOGAP;
                 const auto& poreVolume = ecl_state->fieldProps().porv(true);
                 pinchOptionALL = ecl_grid.getPinchOption() == Opm::PinchMode::ALL;
@@ -224,8 +229,7 @@ namespace cpgrid
                                                         zcornData, actnumData, z_tolerance);
                     if (moved > 0) {
                         Opm::OpmLog::info("Edge-conformal grid: merged " + std::to_string(moved)
-                                          + " ZCORN values within the pinch threshold "
-                                          + std::to_string(z_tolerance) + " m");
+                                          + " ZCORN values within " + std::to_string(z_tolerance) + " m");
                     }
                 }
                 if (!minpv_result.nnc.empty()) {
