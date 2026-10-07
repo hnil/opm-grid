@@ -98,6 +98,11 @@ namespace Dune
                                std::vector<int>& new_actnum,
                                grdecl& output);
 
+        int mergePillarPoints(const std::array<int,3>& dims,
+                              std::vector<double>& zcorn,
+                              const std::vector<int>& actnum,
+                              double tolerance);
+
         void removeOuterCellLayer(processed_grid& grid);
         // void removeUnusedNodes(processed_grid& grid); // NOTE: not deleted, see comment at definition.
         void buildTopo(const processed_grid& output,
@@ -212,6 +217,17 @@ namespace cpgrid
                                           zcornData.data(), nogap, pinchOptionALL,
                                           permZ, multZ, tolerance_unique_points,
                                           /* thin_cells_as_minpv = */ edge_conformal);
+                // A pinch-out leaves the neighbour column's thin corners as
+                // sliver edges on the shared pillar; merge them into one node.
+                if (edge_conformal && z_tolerance > 0.0) {
+                    const int moved = mergePillarPoints({g.dims[0], g.dims[1], g.dims[2]},
+                                                        zcornData, actnumData, z_tolerance);
+                    if (moved > 0) {
+                        Opm::OpmLog::info("Edge-conformal grid: merged " + std::to_string(moved)
+                                          + " ZCORN values within the pinch threshold "
+                                          + std::to_string(z_tolerance) + " m");
+                    }
+                }
                 if (!minpv_result.nnc.empty()) {
                     this->zcorn = zcornData;
                 }
@@ -777,6 +793,91 @@ namespace cpgrid
             int numperlevel = 4*n[0]*n[1];
             zb = *std::max_element(z.begin(), z.begin() + numperlevel);
             zt = *std::min_element(z.end() - numperlevel, z.end());
+        }
+
+
+        // Moves the active ZCORN values on each pillar that lie within the
+        // tolerance of each other onto one value, clustered as uniquify() in
+        // process_grdecl. Returns the number of values moved.
+        int mergePillarPoints(const std::array<int,3>& dims,
+                              std::vector<double>& zcorn,
+                              const std::vector<int>& actnum,
+                              const double tolerance)
+        {
+            const int nx = dims[0], ny = dims[1], nz = dims[2];
+            const auto collapsedCells = [&]() {
+                std::vector<char> collapsed(static_cast<std::size_t>(nx)*ny*nz, 1);
+                for (int k = 0; k < nz; ++k)
+                    for (int j = 0; j < ny; ++j)
+                        for (int i = 0; i < nx; ++i)
+                            for (int c = 0; c < 4; ++c) {
+                                const std::size_t top = (2*i + c%2) + 2*nx*((2*j + c/2) + 2*ny*2*k);
+                                if (zcorn[top] != zcorn[top + 4*nx*ny]) {
+                                    collapsed[i + nx*(j + ny*k)] = 0;
+                                }
+                            }
+                return collapsed;
+            };
+            const auto before = collapsedCells();
+
+            int moved = 0;
+            std::vector<std::size_t> index;
+            std::vector<double> z, anchor;
+            for (int pj = 0; pj <= ny; ++pj) {
+                for (int pi = 0; pi <= nx; ++pi) {
+                    index.clear();
+                    for (int b = 0; b < 2; ++b) {
+                        const int j = pj - 1 + b;
+                        for (int a = 0; a < 2 && j >= 0 && j < ny; ++a) {
+                            const int i = pi - 1 + a;
+                            if (i < 0 || i >= nx) {
+                                continue;
+                            }
+                            for (int k = 0; k < nz; ++k) {
+                                if (!actnum.empty() && actnum[i + nx*(j + ny*k)] == 0) {
+                                    continue;
+                                }
+                                for (int dk = 0; dk < 2; ++dk) {
+                                    index.push_back((2*i + 1 - a) + 2*nx*((2*j + 1 - b) + 2*ny*(2*k + dk)));
+                                }
+                            }
+                        }
+                    }
+                    if (index.empty()) {
+                        continue;
+                    }
+                    z.clear();
+                    for (const auto ix : index) {
+                        z.push_back(zcorn[ix]);
+                    }
+                    std::sort(z.begin(), z.end());
+                    anchor.clear();
+                    for (const double v : z) {
+                        if (anchor.empty() || anchor.back() + tolerance < v) {
+                            anchor.push_back(v);
+                        }
+                    }
+                    for (const auto ix : index) {
+                        const auto cluster = std::upper_bound(anchor.begin(), anchor.end(), zcorn[ix]) - 1;
+                        // The deepest cluster keeps the deepest value, as the bottom boundary.
+                        const double target = (cluster + 1 == anchor.end()) ? z.back() : *cluster;
+                        if (zcorn[ix] != target) {
+                            zcorn[ix] = target;
+                            ++moved;
+                        }
+                    }
+                }
+            }
+
+            const auto after = collapsedCells();
+            for (std::size_t c = 0; c < after.size(); ++c) {
+                if (after[c] && !before[c] && (actnum.empty() || actnum[c] != 0)) {
+                    OPM_THROW(std::logic_error, "Merging pillar points within "
+                              + std::to_string(tolerance) + " m collapsed active cell "
+                              + std::to_string(c) + ", which pinch processing kept.");
+                }
+            }
+            return moved;
         }
 
 
