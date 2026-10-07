@@ -330,12 +330,11 @@ BOOST_AUTO_TEST_CASE(CollapseIsTheCornerPointCoarsening)
     const auto coarse = Opm::Coarsening::coarsenCornerPoint(fine, {south, north}).grid;
     Dune::CpGrid grid;
     grid.processEclipseFormat(view(coarse), false, false, true);
-    // Corner-point processing leaves the thin cells' corners hanging on the thick
-    // cells' edges; the merge lists them, which is the only difference.
+    // Both edge-conformal: the thin cells' corners are listed on the thick cells' edges.
     const auto collapsed = merged(fine, {south, north});
     BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
-    BOOST_CHECK_GT(hangingNodes(grid), 0);
-    checkSame(shape(collapsed), shape(grid), /*extraEdgeNodes*/ true);
+    BOOST_CHECK_EQUAL(hangingNodes(grid), 0);
+    checkSame(shape(collapsed), shape(grid));
 }
 
 // The same on layers that dip and bend: the coarse faces are corner-point faces.
@@ -352,12 +351,11 @@ BOOST_AUTO_TEST_CASE(CollapseIsTheCornerPointCoarseningOnCurvedLayers)
     const auto coarse = Opm::Coarsening::coarsenCornerPoint(fine, {south, north}).grid;
     Dune::CpGrid grid;
     grid.processEclipseFormat(view(coarse), false, false, true);
-    // Corner-point processing leaves the thin cells' corners hanging on the thick
-    // cells' edges; the merge lists them, which is the only difference.
+    // Both edge-conformal: the thin cells' corners are listed on the thick cells' edges.
     const auto collapsed = merged(fine, {south, north});
     BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
-    BOOST_CHECK_GT(hangingNodes(grid), 0);
-    checkSame(shape(collapsed), shape(grid), /*extraEdgeNodes*/ true);
+    BOOST_CHECK_EQUAL(hangingNodes(grid), 0);
+    checkSame(shape(collapsed), shape(grid));
 }
 
 // A layer of zero thickness in some columns, as edge-conformal MINPV leaves it
@@ -399,10 +397,39 @@ BOOST_AUTO_TEST_CASE(ZeroThicknessLayerInsideBlocks)
         return count;
     };
     BOOST_CHECK_EQUAL(boundaryFaces(collapsed), boundaryFaces(grid));
-    // The throw's nodes on faces between two uncoarsened cells hang in both: that
-    // is the edge-conformal processing of the input, not the merge.
-    BOOST_TEST_MESSAGE("hanging nodes: merged " << hangingNodes(collapsed)
-                       << ", corner-point " << hangingNodes(grid));
-    BOOST_CHECK_LT(hangingNodes(collapsed), hangingNodes(grid));
-    checkSame(shape(collapsed), shape(grid), /*extraEdgeNodes*/ true);
+    BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
+    BOOST_CHECK_EQUAL(hangingNodes(grid), 0);
+    checkSame(shape(collapsed), shape(grid));
+}
+
+// Columns x < 200 merge layers 1-2; the columns beside them stay fine and have their
+// layer boundary at z = 15. Fine processing lists the merged columns' z = 20 node on
+// the fine columns' faces along the shared pillar; it is a corner of no cell of the
+// result, so the merge drops it, as the corner-point coarsening never has it.
+BOOST_AUTO_TEST_CASE(MergedLayersBesideFineColumns)
+{
+    auto fine = uniformGrid(4, 100.0, 10.0);
+    const int n = 4;
+    for (int j = 0; j < n; ++j) {
+        for (int i = 2; i < n; ++i) {
+            for (int dj = 0; dj < 2; ++dj) {
+                for (int di = 0; di < 2; ++di) {
+                    fine.zcorn[(2*i + di) + 2ull*n*((2*j + dj) + 2ull*n*3)] = 15.0;   // bottom of k = 1
+                    fine.zcorn[(2*i + di) + 2ull*n*((2*j + dj) + 2ull*n*4)] = 15.0;   // top of k = 2
+                }
+            }
+        }
+    }
+    CoarsenRequest layers;
+    layers.startIJK = {0, 0, 1};
+    layers.endIJK = {2, 4, 3};
+    layers.cellsPerDim = {2, 4, 1};
+
+    const auto coarse = Opm::Coarsening::coarsenCornerPoint(fine, {layers}).grid;
+    Dune::CpGrid grid;
+    grid.processEclipseFormat(view(coarse), false, false, true);
+    const auto collapsed = merged(fine, {layers});
+    BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
+    BOOST_CHECK_EQUAL(hangingNodes(grid), 0);
+    checkSame(shape(collapsed), shape(grid));
 }
