@@ -67,6 +67,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/refinement/trilinear/CpGridRefinement.cpp
   opm/grid/cpgrid/refinement/trilinear/CpGridDataRefinement.cpp
   opm/grid/cpgrid/CpGridData.cpp
+  opm/grid/cpgrid/GeometricCheck.cpp
   opm/grid/cpgrid/CpGridUtilities.cpp
   opm/grid/cpgrid/DataHandleWrappers.cpp
   opm/grid/cpgrid/GridHelpers.cpp
@@ -236,6 +237,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgpreprocess/uniquepoints.h
   opm/grid/cpgrid/CartesianIndexMapper.hpp
   opm/grid/cpgrid/CpGridData.hpp
+  opm/grid/cpgrid/GeometricCheck.hpp
   opm/grid/cpgrid/CpGridDataTraits.hpp
   opm/grid/cpgrid/CpGridUtilities.hpp
   opm/grid/cpgrid/DataHandleWrappers.hpp
