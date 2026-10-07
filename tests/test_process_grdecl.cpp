@@ -796,13 +796,13 @@ BOOST_AUTO_TEST_CASE(Single_Fault_Connection)
             0, 4, 7, 10, 15,
 
             // J faces (5..9)
-            19, 23, 27, 31,
+            19, 24, 28, 32,
 
             // K faces (10..13)
-            35, 40, 44, 49,
+            37, 42, 46, 51,
 
             // End
-            53,
+            55,
         };
 
         BOOST_CHECK_EQUAL_COLLECTIONS(out.face_node_ptr, out.face_node_ptr + out.number_of_faces + 1,
@@ -820,10 +820,10 @@ BOOST_AUTO_TEST_CASE(Single_Fault_Connection)
 
             // --------------------------------------
 
-            2, 0, 1, 4,         // 5, J-min (left)
+            2, 0, 1, 4, 3,      // 5, J-min (left), 3 on its pillar edge
             5, 3, 4, 6,         // 6, J-max (left)
             10, 7, 8, 11,       // 7, J-min (right)
-            12, 9, 11, 13,      // 8, J-max (right)
+            12, 9, 10, 11, 13,  // 8, J-max (right), 10 on its pillar edge
 
             // --------------------------------------
 
