@@ -43,6 +43,7 @@
 #include <opm/grid/common/GeometryHelpers.hpp>
 
 #include <opm/grid/cpgpreprocess/preprocess.h>
+#include <opm/grid/cpgpreprocess/make_edge_conformal.hpp>
 #include <opm/grid/MinpvProcessor.hpp>
 #include <opm/grid/RepairZCORN.hpp>
 #include <opm/grid/utility/OpmLog.hpp>
@@ -106,7 +107,9 @@ namespace Dune
                        cpgrid::OrientedEntityTable<1, 0>& f2c,
                        Opm::SparseTable<int>& f2p,
                        std::vector<std::array<int,8> >& c2p,
-                       std::vector<int>& face_to_output_face);
+                       std::vector<int>& face_to_output_face,
+                       const std::vector<std::array<int,8>>* corners = nullptr);
+        std::vector<std::array<int,8>> cellCornersFromLayerFaces(const processed_grid& output);
         void buildGeom(const processed_grid& output,
                        const cpgrid::OrientedEntityTable<0, 1>& c2f,
                        const std::vector<std::array<int,8> >& c2p,
@@ -550,6 +553,16 @@ namespace cpgrid
             // removeUnusedNodes(output);
         }
 
+        // Top and bottom faces take the pillar and fault-intersection nodes
+        // their cell's vertical faces have; the corners are read before.
+        std::vector<std::array<int,8>> corners;
+        if (edge_conformal) {
+            corners = cellCornersFromLayerFaces(output);
+            if (add_cell_face_mapping(&output) == 0 || make_edge_conformal(&output) == 0) {
+                OPM_THROW(std::runtime_error, "Failed to make the grid edge-conformal");
+            }
+        }
+
         if ((ecl_state != nullptr) && ecl_state->aquifer().hasNumericalAquifer()) {
             const std::size_t global_nc =
                 static_cast<std::size_t>(input_data.dims[0]) *
@@ -585,7 +598,7 @@ namespace cpgrid
         buildTopo(output, nnc, global_cell_,
                   cell_to_face_, face_to_cell_,
                   face_to_point_, cell_to_point_,
-                  face_to_output_face);
+                  face_to_output_face, edge_conformal ? &corners : nullptr);
 
         std::copy_n(output.dimensions, 3, logical_cartesian_size_.begin());
 
@@ -1226,7 +1239,8 @@ namespace cpgrid
                        cpgrid::OrientedEntityTable<1, 0>& f2c,
                        Opm::SparseTable<int>& f2p,
                        std::vector<std::array<int,8> >& c2p,
-                       std::vector<int>& face_to_output_face)
+                       std::vector<int>& face_to_output_face,
+                       const std::vector<std::array<int,8>>* corners)
         {
             // Map local to global cell index.
             global_cell.assign(output.local_cell_index,
@@ -1255,6 +1269,10 @@ namespace cpgrid
 
             // Build cell to point
             c2p.clear();
+            if (corners != nullptr) {
+                c2p = *corners;
+                return;
+            }
             c2p.reserve(num_cells);
             for (int i = 0; i < num_cells; ++i) {
                 cpgrid::OrientedEntityTable<0, 1>::row_type cf = c2f[cpgrid::EntityRep<0>(i, true)];
@@ -1288,6 +1306,36 @@ namespace cpgrid
             c2f.makeInverseRelation(f2c_again);
             assert(f2c == f2c_again);
 #endif
+        }
+
+        // Each cell's corners from its two layer faces while they still have only
+        // their four corners, in buildTopo's order (lower-numbered face first).
+        std::vector<std::array<int,8>> cellCornersFromLayerFaces(const processed_grid& output)
+        {
+            std::vector<std::array<int,2>> layerFaces(output.number_of_cells, {-1, -1});
+            for (unsigned f = 0; f < output.number_of_faces; ++f) {
+                if (output.face_tag[f] != K_FACE) {
+                    continue;
+                }
+                for (int side = 0; side < 2; ++side) {
+                    const int c = output.face_neighbors[2*f + side];
+                    if (c >= 0) {
+                        auto& lf = layerFaces[c];
+                        (lf[0] < 0 ? lf[0] : lf[1]) = static_cast<int>(f);
+                    }
+                }
+            }
+            std::vector<std::array<int,8>> corners(output.number_of_cells);
+            for (int c = 0; c < output.number_of_cells; ++c) {
+                const unsigned b = output.face_node_ptr[layerFaces[c][0]];
+                const unsigned t = output.face_node_ptr[layerFaces[c][1]];
+                assert(output.face_node_ptr[layerFaces[c][0] + 1] - b == 4);
+                assert(output.face_node_ptr[layerFaces[c][1] + 1] - t == 4);
+                const int* fn = output.face_nodes;
+                corners[c] = {{ fn[b], fn[b + 1], fn[b + 3], fn[b + 2],
+                                fn[t], fn[t + 1], fn[t + 3], fn[t + 2] }};
+            }
+            return corners;
         }
 
         /// Encapsulate a vector<T>, and a permutation array used for access.
