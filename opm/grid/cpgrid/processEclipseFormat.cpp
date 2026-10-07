@@ -760,8 +760,11 @@ namespace cpgrid
     // Faces between the same two coarse cells (or on the same side of one at
     // the boundary) become one face through the patch corners, keeping the
     // outline nodes another face has as a vertex: the corner-point face.
+    // essential: nodes some cell of the result has as a corner, and fault
+    // crossings; any other node of the input is dropped from every face.
     std::vector<KeptFace> collapseCoarseFaces(std::vector<KeptFace> kept,
-                                              const processed_grid& output)
+                                              const processed_grid& output,
+                                              const std::vector<char>& essential)
     {
         using Key = std::tuple<int,bool,int,bool,int>;
         std::map<Key, int> groupOf;
@@ -785,7 +788,7 @@ namespace cpgrid
         }
 
         std::vector<std::optional<std::vector<int>>> outline(groups.size());
-        std::set<int> keep;   // nodes some final face has as a vertex
+        const auto keep = [&essential](int n) { return essential[n] != 0; };
         for (std::size_t g = 0; g < groups.size(); ++g) {
             if (groups[g].size() > 1) {
                 std::vector<const KeptFace*> faces;
@@ -803,15 +806,10 @@ namespace cpgrid
                         ++uses[n];
                     }
                 }
-                for (const int n : *outline[g]) {
-                    if (uses[n] != 2) {
-                        keep.insert(n);
-                    }
-                }
-            } else {
-                for (const int f : groups[g]) {
-                    keep.insert(kept[f].nodes.begin(), kept[f].nodes.end());
-                }
+                auto& nodes = *outline[g];
+                nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
+                                           [&](int n) { return uses[n] == 2 && !keep(n); }),
+                            nodes.end());
             }
         }
 
@@ -820,17 +818,16 @@ namespace cpgrid
         for (std::size_t g = 0; g < groups.size(); ++g) {
             if (!outline[g]) {
                 for (const int f : groups[g]) {
+                    auto& nodes = kept[f].nodes;
+                    nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
+                                               [&](int n) { return !keep(n); }),
+                                nodes.end());
                     result.push_back(std::move(kept[f]));
                 }
                 continue;
             }
             KeptFace k = std::move(kept[groups[g].front()]);
-            k.nodes.clear();
-            for (const int n : *outline[g]) {
-                if (keep.count(n) > 0) {
-                    k.nodes.push_back(n);
-                }
-            }
+            k.nodes = *outline[g];
             result.push_back(std::move(k));
         }
         return result;
@@ -861,6 +858,13 @@ namespace cpgrid
             OPM_THROW(std::runtime_error,
                       "Failed to build unstructured grid from COORD/ZCORN");
         }
+        std::vector<std::array<int,8>> corners;
+        if (edge_conformal) {
+            corners = cellCornersFromLayerFaces(output);
+            if (add_cell_face_mapping(&output) == 0 || make_edge_conformal(&output) == 0) {
+                OPM_THROW(std::runtime_error, "Failed to make the grid edge-conformal");
+            }
+        }
 
         // The input's own topology first: the merge is a relabelling of it.
         NNCMaps no_nnc{};
@@ -871,7 +875,7 @@ namespace cpgrid
         std::vector<std::array<int,8>> fine_c2p;
         std::vector<int> fine_face_to_output;
         buildTopo(output, no_nnc, fine_global_cell, fine_c2f, fine_f2c, fine_f2p,
-                  fine_c2p, fine_face_to_output);
+                  fine_c2p, fine_face_to_output, edge_conformal ? &corners : nullptr);
 
         const int numFine = static_cast<int>(fine_global_cell.size());
         const std::array<int,3> dims{output.dimensions[0], output.dimensions[1],
@@ -932,8 +936,35 @@ namespace cpgrid
             k.nodes.assign(pts.begin(), pts.end());
             kept.push_back(std::move(k));
         }
+        // A block's corner is the outer corner of the cell at it; a corner cell
+        // of zero thickness is not in the grid, the next one inward along the
+        // column has the same corner.
+        const auto blockCorner = [&](const std::array<int,6>& box, int di, int dj, int dk) {
+            for (int n = 0; n <= box[5] - box[2]; ++n) {
+                const int cell = localOfCartesian[cartesian(di ? box[3] : box[0],
+                                                            dj ? box[4] : box[1],
+                                                            dk ? box[5] - n : box[2] + n)];
+                if (cell >= 0) {
+                    return fine_c2p[cell][4*dk + 2*dj + di];
+                }
+            }
+            return -1;
+        };
         if (collapse_coarse_faces) {
-            kept = collapseCoarseFaces(std::move(kept), output);
+            std::vector<char> essential(output.number_of_nodes, 0);
+            for (int n = output.number_of_nodes_on_pillars; n < output.number_of_nodes; ++n) {
+                essential[n] = 1;
+            }
+            for (int c = 0; c < numCoarse; ++c) {
+                for (int corner = 0; corner < 8; ++corner) {
+                    const int node = blockCorner(blockBox[blockOfCoarse[c]],
+                                                 corner & 1, (corner >> 1) & 1, corner >> 2);
+                    if (node >= 0) {
+                        essential[node] = 1;
+                    }
+                }
+            }
+            kept = collapseCoarseFaces(std::move(kept), output, essential);
         }
 
         face_to_cell_.clear();
@@ -994,35 +1025,22 @@ namespace cpgrid
         geomGrid.face_node_ptr = geomFacePtr.data();
         geomGrid.number_of_faces = static_cast<int>(geomFacePtr.size()) - 1;
 
-        // A block is a box, so its eight corners are the outer corners of the
-        // cells at its corners. A corner cell of zero thickness is not in the
-        // grid; the next one inward along the column has the same corner.
         cell_to_point_.assign(numCoarse, std::array<int,8>{});
         for (int c = 0; c < numCoarse; ++c) {
-            const auto& box = blockBox[blockOfCoarse[c]];
-            for (int dk = 0; dk < 2; ++dk) {
-                for (int dj = 0; dj < 2; ++dj) {
-                    for (int di = 0; di < 2; ++di) {
-                        int corner = -1;
-                        for (int n = 0; n <= box[5] - box[2] && corner < 0; ++n) {
-                            corner = localOfCartesian[cartesian(di ? box[3] : box[0],
-                                                                dj ? box[4] : box[1],
-                                                                dk ? box[5] - n : box[2] + n)];
-                        }
-                        if (corner < 0) {
-                            OPM_THROW(std::runtime_error,
-                                      "Coarsening: no cell of a block's corner column is in the "
-                                      "grid, so the block has no eight corners.");
-                        }
-                        const int node = newNode[fine_c2p[corner][4*dk + 2*dj + di]];
-                        if (node < 0) {
-                            OPM_THROW(std::runtime_error,
-                                      "Coarsening: a block's corner node is not on any of its "
-                                      "faces");
-                        }
-                        cell_to_point_[c][4*dk + 2*dj + di] = node;
-                    }
+            for (int corner = 0; corner < 8; ++corner) {
+                const int fine = blockCorner(blockBox[blockOfCoarse[c]],
+                                             corner & 1, (corner >> 1) & 1, corner >> 2);
+                if (fine < 0) {
+                    OPM_THROW(std::runtime_error,
+                              "Coarsening: no cell of a block's corner column is in the "
+                              "grid, so the block has no eight corners.");
                 }
+                const int node = newNode[fine];
+                if (node < 0) {
+                    OPM_THROW(std::runtime_error,
+                              "Coarsening: a block's corner node is not on any of its faces");
+                }
+                cell_to_point_[c][corner] = node;
             }
         }
 
