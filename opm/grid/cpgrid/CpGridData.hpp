@@ -262,6 +262,9 @@ public:
     /// edge-conformal grid.  Typically useful in geo-mechanical
     /// applications.
     ///
+    /// \param[in] merge_tolerance Edge-conformal only: thin-cell and
+    /// pillar-point merge distance, when larger than the PINCH threshold.
+    ///
     /// \return Cells removed due low pore-volume and across which to create
     /// non-neighbouring connections if item 4 of the 'PINCH' keyword is set
     /// to 'ALL'.
@@ -272,7 +275,8 @@ public:
                          bool turn_normals = false,
                          bool clip_z = false,
                          bool pinchActive = true,
-                         bool edge_conformal = false);
+                         bool edge_conformal = false,
+                         double merge_tolerance = 0.0);
 
     /// Read the Eclipse grid format ('grdecl').
     ///
