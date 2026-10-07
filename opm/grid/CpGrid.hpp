@@ -264,6 +264,11 @@ namespace Dune
         /// \param[in] edge_conformal Whether or not to construct an
         /// edge-conformal grid.  Typically useful in geo-mechanical
         /// applications.
+        ///
+        /// \param[in] merge_tolerance Edge-conformal only: cells thinner than
+        /// this on average are merged away like pinched cells, and pillar
+        /// points closer than this become one node. The PINCH threshold is
+        /// used when it is larger.
         std::vector<std::size_t>
         processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              Opm::EclipseState* ecl_state,
@@ -271,7 +276,8 @@ namespace Dune
                              bool turn_normals,
                              bool clip_z,
                              bool pinchActive,
-                             bool edge_conformal);
+                             bool edge_conformal,
+                             double merge_tolerance = 0.0);
 
         /// Read the Eclipse grid format ('grdecl').
         ///
@@ -310,13 +316,19 @@ namespace Dune
         /// \param[in] edge_conformal Whether or not to construct an
         /// edge-conformal grid.  Typically useful in geo-mechanical
         /// applications.
+        ///
+        /// \param[in] merge_tolerance Edge-conformal only: cells thinner than
+        /// this on average are merged away like pinched cells, and pillar
+        /// points closer than this become one node. The PINCH threshold is
+        /// used when it is larger.
         std::vector<std::size_t>
         processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              Opm::EclipseState* ecl_state,
                              bool periodic_extension,
                              bool turn_normals = false,
                              bool clip_z = false,
-                             bool edge_conformal = false);
+                             bool edge_conformal = false,
+                             double merge_tolerance = 0.0);
 
         /// Read the Eclipse grid format ('grdecl').
         ///
