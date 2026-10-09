@@ -38,7 +38,7 @@
 #endif
 
 #include <opm/grid/cpgrid/CpGridData.hpp>
-#include <opm/grid/cpgrid/refinement/RetainedCornerPointInput.hpp>
+#include <opm/grid/cpgrid/RetainedCornerPointInput.hpp>
 
 #include <opm/grid/common/GeometryHelpers.hpp>
 
@@ -60,10 +60,13 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <fstream>
 #include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <optional>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -116,6 +119,7 @@ namespace Dune
                        const std::vector<std::array<int,8>>* corners = nullptr);
         std::vector<std::array<int,8>> cellCornersFromLayerFaces(const processed_grid& output);
         void buildGeom(const processed_grid& output,
+                       int num_cells,
                        const cpgrid::OrientedEntityTable<0, 1>& c2f,
                        const std::vector<std::array<int,8> >& c2p,
                        const std::vector<int>& face_to_output_face,
@@ -391,8 +395,10 @@ namespace cpgrid
             ecl_state->prune_global_for_schedule_run();
         }
 
-        // Post-MINPV input, for the Conforming backend's refinement builder.
-        if (retain_cp_input_ && ecl_state && ecl_state->getLgrs().size() > 0) {
+        // Post-MINPV input, for the Conforming backend's refinement builder or, on
+        // request, for a second grid on the same geometry.
+        const bool retainForLgr = retain_cp_input_ && ecl_state && ecl_state->getLgrs().size() > 0;
+        if (retainForLgr || Opm::RetainCornerPointInput::enabled()) {
             auto retained = std::make_shared<Opm::Refinement::RetainedCornerPointInput>();
             retained->dims = { static_cast<int>(ecl_grid.getNX()),
                                static_cast<int>(ecl_grid.getNY()),
@@ -403,7 +409,12 @@ namespace cpgrid
             retained->edgeConformal = edge_conformal;
             retained->pinchNnc = nnc_cells[PinchNNC];
             retained->pinchActive = pinchActive;
-            retained_cp_input_ = std::move(retained);
+            if (Opm::RetainCornerPointInput::enabled()) {
+                Opm::RetainCornerPointInput::store(retained);
+            }
+            if (retainForLgr) {
+                retained_cp_input_ = std::move(retained);
+            }
         }
 
         // this variable is only required because getCellZvals() needs
@@ -644,7 +655,8 @@ namespace cpgrid
             std::ranges::sort(aquifer_cells_);
         }
 
-        buildGeom(output, cell_to_face_, cell_to_point_,
+        buildGeom(output, static_cast<int>(cell_to_point_.size()),
+                  cell_to_face_, cell_to_point_,
                   face_to_output_face,
                   aquifer_cell_volumes_local,
                   geometry_.geomVector(std::integral_constant<int,0>()),
@@ -685,6 +697,365 @@ namespace cpgrid
 #ifdef VERBOSE
         std::cout << "Done with grid processing." << std::endl;
 #endif
+    }
+
+
+    /// See CpGridData.hpp: merge boxes of a corner-point description into
+    /// single cells, keeping every face between blocks as it is.
+    namespace {
+    struct KeptFace
+    {
+        EntityRep<0> cells[2];
+        int count;
+        int output;              // face of the processed input, or NNCFace
+        std::vector<int> nodes;  // input node numbers, in the face's order
+    };
+
+    // The outline of a set of faces with consistent orientation, if they form
+    // one patch without holes.
+    std::optional<std::vector<int>> patchOutline(const std::vector<const KeptFace*>& faces)
+    {
+        std::map<std::pair<int,int>, int> directed;
+        std::set<int> vertices;
+        for (const auto* k : faces) {
+            const auto& n = k->nodes;
+            for (std::size_t i = 0; i < n.size(); ++i) {
+                ++directed[{n[i], n[(i + 1) % n.size()]}];
+                vertices.insert(n[i]);
+            }
+        }
+        std::map<int,int> next;
+        int numEdges = 0;
+        for (const auto& [e, count] : directed) {
+            if (count > 1) {
+                return std::nullopt;
+            }
+            const bool interior = directed.count({e.second, e.first}) > 0;
+            numEdges += interior ? 1 : 2;   // interior edges are seen twice
+            if (!interior && !next.emplace(e.first, e.second).second) {
+                return std::nullopt;
+            }
+        }
+        // Euler characteristic of a disc
+        if (static_cast<int>(vertices.size()) - numEdges/2 + static_cast<int>(faces.size()) != 1) {
+            return std::nullopt;
+        }
+        std::vector<int> loop{next.begin()->first};
+        while (loop.size() <= next.size()) {
+            const auto it = next.find(loop.back());
+            if (it == next.end()) {
+                return std::nullopt;
+            }
+            if (it->second == loop.front()) {
+                break;
+            }
+            loop.push_back(it->second);
+        }
+        if (loop.size() != next.size()) {
+            return std::nullopt;
+        }
+        return loop;
+    }
+
+    // Faces between the same two coarse cells (or on the same side of one at
+    // the boundary) become one face: the outline of the fine faces, keeping
+    // only the nodes where it turns or that another face has as a vertex.
+    std::vector<KeptFace> collapseCoarseFaces(std::vector<KeptFace> kept,
+                                              const processed_grid& output)
+    {
+        using Key = std::tuple<int,bool,int,bool,int>;
+        std::map<Key, int> groupOf;
+        std::vector<std::vector<int>> groups;
+        for (std::size_t f = 0; f < kept.size(); ++f) {
+            const auto& k = kept[f];
+            if (k.output == NNCFace) {
+                groups.push_back({static_cast<int>(f)});
+                continue;
+            }
+            const Key key = (k.count == 2)
+                ? Key{k.cells[0].index(), k.cells[0].orientation(),
+                      k.cells[1].index(), k.cells[1].orientation(), -1}
+                : Key{k.cells[0].index(), k.cells[0].orientation(), -1, false,
+                      static_cast<int>(output.face_tag[k.output])};
+            const auto [it, isNew] = groupOf.emplace(key, static_cast<int>(groups.size()));
+            if (isNew) {
+                groups.emplace_back();
+            }
+            groups[it->second].push_back(static_cast<int>(f));
+        }
+
+        const auto* xyz = output.node_coordinates;
+        const auto turns = [xyz](int a, int p, int b) {
+            double d1[3], d2[3];
+            for (int d = 0; d < 3; ++d) {
+                d1[d] = xyz[3*p + d] - xyz[3*a + d];
+                d2[d] = xyz[3*b + d] - xyz[3*p + d];
+            }
+            const double c[3] = {d1[1]*d2[2] - d1[2]*d2[1], d1[2]*d2[0] - d1[0]*d2[2],
+                                 d1[0]*d2[1] - d1[1]*d2[0]};
+            const double n1 = d1[0]*d1[0] + d1[1]*d1[1] + d1[2]*d1[2];
+            const double n2 = d2[0]*d2[0] + d2[1]*d2[1] + d2[2]*d2[2];
+            return c[0]*c[0] + c[1]*c[1] + c[2]*c[2] > 1e-18 * n1 * n2;
+        };
+
+        std::vector<std::optional<std::vector<int>>> outline(groups.size());
+        std::set<int> keep;   // nodes some final face has as a vertex
+        for (std::size_t g = 0; g < groups.size(); ++g) {
+            if (groups[g].size() > 1) {
+                std::vector<const KeptFace*> faces;
+                for (const int f : groups[g]) {
+                    faces.push_back(&kept[f]);
+                }
+                outline[g] = patchOutline(faces);
+            }
+            if (outline[g]) {
+                const auto& loop = *outline[g];
+                for (std::size_t i = 0; i < loop.size(); ++i) {
+                    if (turns(loop[(i + loop.size() - 1) % loop.size()], loop[i],
+                              loop[(i + 1) % loop.size()])) {
+                        keep.insert(loop[i]);
+                    }
+                }
+            } else {
+                for (const int f : groups[g]) {
+                    keep.insert(kept[f].nodes.begin(), kept[f].nodes.end());
+                }
+            }
+        }
+
+        std::vector<KeptFace> result;
+        result.reserve(groups.size());
+        for (std::size_t g = 0; g < groups.size(); ++g) {
+            if (!outline[g]) {
+                for (const int f : groups[g]) {
+                    result.push_back(std::move(kept[f]));
+                }
+                continue;
+            }
+            KeptFace k = std::move(kept[groups[g].front()]);
+            k.nodes.clear();
+            for (const int n : *outline[g]) {
+                if (keep.count(n) > 0) {
+                    k.nodes.push_back(n);
+                }
+            }
+            result.push_back(std::move(k));
+        }
+        return result;
+    }
+    } // anonymous namespace
+
+    void CpGridData::processEclipseFormatCoarsened(const grdecl& input_data,
+                                                   const std::vector<int>& blockOfCartesian,
+                                                   const std::vector<std::array<int,6>>& blockBox,
+                                                   const bool edge_conformal,
+                                                   const bool collapse_coarse_faces)
+    {
+        if (ccobj_.rank() != 0) {
+            return;   // the grid is built on rank 0 and distributed afterwards
+        }
+
+        processed_grid output{};
+        free_processed_grid(&output);
+        const int process_ok = process_grdecl(/* pinchActive = */ 0,
+                                              static_cast<int>(edge_conformal),
+                                              /* tolerance_unique_points = */ 0.0,
+                                              &input_data,
+                                              /* is_aquifer_cell = */ nullptr,
+                                              &output);
+        if (process_ok == 0) {
+            OPM_THROW(std::runtime_error,
+                      "Failed to build unstructured grid from COORD/ZCORN");
+        }
+
+        // The input's own topology first: the merge is a relabelling of it.
+        NNCMaps no_nnc{};
+        std::vector<int> fine_global_cell;
+        cpgrid::OrientedEntityTable<0, 1> fine_c2f;
+        cpgrid::OrientedEntityTable<1, 0> fine_f2c;
+        Opm::SparseTable<int> fine_f2p;
+        std::vector<std::array<int,8>> fine_c2p;
+        std::vector<int> fine_face_to_output;
+        buildTopo(output, no_nnc, fine_global_cell, fine_c2f, fine_f2c, fine_f2p,
+                  fine_c2p, fine_face_to_output);
+
+        const int numFine = static_cast<int>(fine_global_cell.size());
+        const std::array<int,3> dims{output.dimensions[0], output.dimensions[1],
+                                     output.dimensions[2]};
+        const auto cartesian = [&dims](int i, int j, int k) {
+            return i + dims[0]*(j + static_cast<std::size_t>(dims[1])*k);
+        };
+
+        std::vector<int> localOfCartesian(static_cast<std::size_t>(dims[0])*dims[1]*dims[2], -1);
+        for (int c = 0; c < numFine; ++c) {
+            localOfCartesian[fine_global_cell[c]] = c;
+        }
+
+        // Blocks that hold at least one cell, numbered in Cartesian order of
+        // their first corner so the result is ordered like a grid.
+        std::vector<int> cellsInBlock(blockBox.size(), 0);
+        std::vector<int> blockOfCell(numFine, -1);
+        for (int c = 0; c < numFine; ++c) {
+            const int b = blockOfCartesian[fine_global_cell[c]];
+            if (b < 0 || b >= static_cast<int>(blockBox.size())) {
+                OPM_THROW(std::runtime_error,
+                          "Coarsening: cell " + std::to_string(fine_global_cell[c])
+                          + " belongs to no block");
+            }
+            blockOfCell[c] = b;
+            ++cellsInBlock[b];
+        }
+        std::vector<int> coarseOfBlock(blockBox.size(), -1);
+        std::vector<int> blockOfCoarse;
+        for (std::size_t b = 0; b < blockBox.size(); ++b) {
+            if (cellsInBlock[b] > 0) {
+                coarseOfBlock[b] = static_cast<int>(blockOfCoarse.size());
+                blockOfCoarse.push_back(static_cast<int>(b));
+            }
+        }
+        const int numCoarse = static_cast<int>(blockOfCoarse.size());
+
+        const auto coarseOfCell = [&](int cell) { return coarseOfBlock[blockOfCell[cell]]; };
+
+        // Keep every face whose two sides end up in different cells.
+        std::vector<KeptFace> kept;
+        kept.reserve(fine_f2c.size());
+        for (int f = 0; f < fine_f2c.size(); ++f) {
+            const auto row = fine_f2c[cpgrid::EntityRep<1>(f, true)];
+            KeptFace k{};
+            k.count = 0;
+            for (int s = 0; s < row.size(); ++s) {
+                k.cells[k.count].setValue(coarseOfCell(row[s].index()), row[s].orientation());
+                ++k.count;
+            }
+            if (k.count == 2 && k.cells[0].index() == k.cells[1].index()) {
+                continue;                  // inside a block
+            }
+            // The row keeps the input's order: the face's node order runs with
+            // it, and swapping the two would turn the normal around.
+            k.output = fine_face_to_output[f];
+            const auto pts = fine_f2p[f];
+            k.nodes.assign(pts.begin(), pts.end());
+            kept.push_back(std::move(k));
+        }
+        if (collapse_coarse_faces) {
+            kept = collapseCoarseFaces(std::move(kept), output);
+        }
+
+        face_to_cell_.clear();
+        for (const auto& k : kept) {
+            face_to_cell_.appendRow(k.cells, k.cells + k.count);
+        }
+        face_to_cell_.makeInverseRelation(cell_to_face_);
+
+        // Nodes that only the dropped faces used are now inside a cell. VEM
+        // and the like assemble over faces, so such a node would leave an
+        // empty row: renumber them away.
+        std::vector<int> newNode(output.number_of_nodes, -1);
+        for (const auto& k : kept) {
+            if (k.output == cpgrid::NNCFace) {
+                continue;
+            }
+            for (const int n : k.nodes) {
+                newNode[n] = 1;
+            }
+        }
+        int numNodes = 0;
+        for (int n = 0; n < output.number_of_nodes; ++n) {
+            if (newNode[n] > 0) {
+                for (int d = 0; d < 3; ++d) {
+                    output.node_coordinates[3*numNodes + d] = output.node_coordinates[3*n + d];
+                }
+                newNode[n] = numNodes++;
+            }
+        }
+        output.number_of_nodes = numNodes;
+
+        // Faces keep their nodes, so the geometry is the input's (a collapsed
+        // face is the outline of the faces it replaces).
+        face_to_point_.clear();
+        std::vector<int> face_to_output_face;
+        std::vector<int> geomFaceNodes;
+        std::vector<unsigned> geomFacePtr{0};
+        std::vector<enum face_tag> tags;
+        std::vector<int> nodes;
+        for (const auto& k : kept) {
+            nodes.clear();
+            for (const int n : k.nodes) {
+                nodes.push_back(newNode[n]);     // renumbered above
+            }
+            face_to_point_.appendRow(nodes.begin(), nodes.end());
+            tags.push_back(k.output == cpgrid::NNCFace ? NNC_FACE : output.face_tag[k.output]);
+            if (k.output == cpgrid::NNCFace) {
+                face_to_output_face.push_back(cpgrid::NNCFace);
+            } else {
+                face_to_output_face.push_back(static_cast<int>(geomFacePtr.size()) - 1);
+                geomFaceNodes.insert(geomFaceNodes.end(), nodes.begin(), nodes.end());
+                geomFacePtr.push_back(static_cast<unsigned>(geomFaceNodes.size()));
+            }
+        }
+        // Geometry is computed from this face table rather than the input's.
+        processed_grid geomGrid = output;
+        geomGrid.face_nodes = geomFaceNodes.data();
+        geomGrid.face_node_ptr = geomFacePtr.data();
+        geomGrid.number_of_faces = static_cast<int>(geomFacePtr.size()) - 1;
+
+        // A block is a box, so its eight corners are the outer corners of the
+        // cells at its corners.
+        cell_to_point_.assign(numCoarse, std::array<int,8>{});
+        for (int c = 0; c < numCoarse; ++c) {
+            const auto& box = blockBox[blockOfCoarse[c]];
+            for (int dk = 0; dk < 2; ++dk) {
+                for (int dj = 0; dj < 2; ++dj) {
+                    for (int di = 0; di < 2; ++di) {
+                        const int corner = localOfCartesian[cartesian(di ? box[3] : box[0],
+                                                                      dj ? box[4] : box[1],
+                                                                      dk ? box[5] : box[2])];
+                        if (corner < 0) {
+                            OPM_THROW(std::runtime_error,
+                                      "Coarsening: the cell at a block's corner is not in the "
+                                      "grid, so the block has no eight corners. Blocks must be "
+                                      "boxes of cells that all exist.");
+                        }
+                        const int node = newNode[fine_c2p[corner][4*dk + 2*dj + di]];
+                        if (node < 0) {
+                            OPM_THROW(std::runtime_error,
+                                      "Coarsening: a block's corner node is not on any of its "
+                                      "faces");
+                        }
+                        cell_to_point_[c][4*dk + 2*dj + di] = node;
+                    }
+                }
+            }
+        }
+
+        // Anchor each cell at its block's first corner.
+        global_cell_.assign(numCoarse, 0);
+        for (int c = 0; c < numCoarse; ++c) {
+            const auto& box = blockBox[blockOfCoarse[c]];
+            global_cell_[c] = static_cast<int>(cartesian(box[0], box[1], box[2]));
+        }
+
+        std::copy_n(output.dimensions, 3, logical_cartesian_size_.begin());
+
+        const std::unordered_map<std::size_t, double> no_aquifers{};
+        buildGeom(geomGrid, numCoarse, cell_to_face_, cell_to_point_, face_to_output_face,
+                  no_aquifers,
+                  geometry_.geomVector(std::integral_constant<int,0>()),
+                  geometry_.geomVector(std::integral_constant<int,1>()),
+                  geometry_.pointGeometryPtr(),
+                  face_normals_,
+                  /* turn_normals = */ false);
+
+        face_tag_.assign(tags.begin(), tags.end());
+
+        free_processed_grid(&output);
+
+        computeUniqueBoundaryIds();
+        if (ccobj_.size() > 1) {
+            populateGlobalCellIndexSet();
+        }
+        index_set_ = std::make_unique<IndexSet>(cell_to_face_.size(), geomVector<3>().size());
     }
 
     } // end namespace cpgrid
@@ -1510,6 +1881,7 @@ namespace cpgrid
 
 
         void buildGeom(const processed_grid& output,
+                       int num_cells,
                        const cpgrid::OrientedEntityTable<0, 1>& c2f,
                        const std::vector<std::array<int,8> >& c2p,
                        const std::vector<int>& face_to_output_face,
@@ -1588,7 +1960,7 @@ namespace cpgrid
             std::cout << "Faces:              " << clock.secsSinceLast() << std::endl;
 #endif
             // Get the cell data.
-            int nc = output.number_of_cells;
+            int nc = num_cells;   // the merged grid has fewer cells than the input
             std::vector<int> face_indices;
             for (int cell = 0; cell < nc; ++cell) {
                 cpgrid::EntityRep<0> cell_ent(cell, true);
