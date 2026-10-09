@@ -66,6 +66,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/refinement/RefinementBuilder.cpp
   opm/grid/cpgrid/refinement/trilinear/CpGridRefinement.cpp
   opm/grid/cpgrid/refinement/trilinear/CpGridDataRefinement.cpp
+  opm/grid/cpgrid/AdaptiveCpGrid.cpp
   opm/grid/cpgrid/CpGridData.cpp
   opm/grid/cpgrid/GeometricCheck.cpp
   opm/grid/cpgrid/CpGridUtilities.cpp
@@ -97,6 +98,8 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/lgr_backend_switch_test.cpp
   tests/cpgrid/grdecl_refinement_test.cpp
   tests/cpgrid/level_grid_assembler_test.cpp
+  tests/cpgrid/adaptive_cpgrid_test.cpp
+  tests/cpgrid/adaptive_cpgrid_bench.cpp
   tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
@@ -236,6 +239,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgpreprocess/preprocess.h
   opm/grid/cpgpreprocess/uniquepoints.h
   opm/grid/cpgrid/CartesianIndexMapper.hpp
+  opm/grid/cpgrid/AdaptiveCpGrid.hpp
   opm/grid/cpgrid/CpGridData.hpp
   opm/grid/cpgrid/GeometricCheck.hpp
   opm/grid/cpgrid/CpGridDataTraits.hpp
