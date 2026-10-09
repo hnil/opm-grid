@@ -53,6 +53,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgpreprocess/uniquepoints.c
   opm/grid/cpgrid/CpGrid.cpp
   opm/grid/cpgrid/CpGridLevels.cpp
+  opm/grid/cpgrid/coarsening/CornerPointCoarsening.cpp
   opm/grid/cpgrid/refinement/CpGridLgrBackend.cpp
   opm/grid/cpgrid/refinement/conforming/ConformingBlockBuilder.cpp
   opm/grid/cpgrid/refinement/conforming/EdgeConformal.cpp
@@ -97,6 +98,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/lgr_backend_switch_test.cpp
   tests/cpgrid/grdecl_refinement_test.cpp
   tests/cpgrid/level_grid_assembler_test.cpp
+  tests/cpgrid/coarsening_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
@@ -122,6 +124,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/lgr/distribute_level_zero_from_grid_with_lgrs_and_wells_test.cpp
   tests/cpgrid/lgr/distribute_level_zero_from_grid_with_lgrs_test.cpp
   tests/cpgrid/lgr/getParentIntersectionFromLgrBoundaryFace_test.cpp
+  tests/cpgrid/lgr/coarsen_inverse_of_lgr_test.cpp
   tests/cpgrid/lgr/global_refine_via_builder_test.cpp
   tests/cpgrid/lgr/global_refine_test.cpp
   tests/cpgrid/lgr/grid_global_id_set_test.cpp
@@ -192,6 +195,7 @@ list(APPEND EXAMPLE_SOURCE_FILES
 )
 
 list(APPEND PROGRAM_SOURCE_FILES
+  examples/coarsen_grdecl.cpp
   examples/grdecl2vtu.cpp
   examples/mirror_grid.cpp
 )
@@ -263,6 +267,8 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/refinement/conforming/LevelGridAssembler.hpp
   opm/grid/cpgrid/refinement/conforming/RefinedDistribution.hpp
   opm/grid/cpgrid/refinement/conforming/RefinedIds.hpp
+  opm/grid/cpgrid/coarsening/CornerPointCoarsening.hpp
+  opm/grid/cpgrid/RetainedCornerPointInput.hpp
   opm/grid/cpgrid/refinement/GridStateWriter.hpp
   opm/grid/cpgrid/refinement/RefinementBuilder.hpp
   opm/grid/cpgrid/refinement/RefinementRequest.hpp
