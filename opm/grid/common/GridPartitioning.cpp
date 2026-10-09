@@ -572,7 +572,9 @@ int addOverlapLayer([[maybe_unused]] const CpGrid& grid,
 
     auto it = validLevel?  grid.template lbegin<0>(level) : grid.template leafbegin<0>();
     const auto& endIt = validLevel?  grid.template lend<0>(level) : grid.template leafend<0>();
-    const std::array<std::vector<std::set<int>>,2> vertex_cell_maps = grid.vertexCell();
+    // Only corner cells need the vertex adjacency, of the view being distributed.
+    const auto vertex_cell_maps = addCornerCells ? grid.vertexCell(level)
+                                                 : std::array<std::vector<std::set<int>>,2>{};
     for (; it != endIt; ++it) {
         int index = ix.index(*it);
         auto owner = cell_part[index];
