@@ -177,6 +177,7 @@ BOOST_AUTO_TEST_CASE(FaultedGridVerticesReached)
         }
     }
 
+    grid.setCornerCellsByVertex(true);
     grid.loadBalance(parts, /* ownersFirst = */ false,
                      /* addCornerCells = */ true, /* overlapLayers = */ 1);
 
