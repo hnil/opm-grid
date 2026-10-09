@@ -355,6 +355,14 @@ namespace Dune
                                   bool pinchActive,
                                   bool edge_conformal);
 
+        /// Build a grid whose cells are boxes of the input merged into one (blockBox per block,
+        /// {i1, j1, k1, i2, j2, k2} inclusive; blockOfCartesian -1 for unmerged cells).
+        void processEclipseFormatCoarsened(const grdecl& input_data,
+                                           const std::vector<int>& blockOfCartesian,
+                                           const std::vector<std::array<int,6>>& blockBox,
+                                           bool edge_conformal = false,
+                                           bool collapse_coarse_faces = false);
+
         //@}
 
         /// \name Cartesian grid extensions.
