@@ -1083,22 +1083,19 @@ int CpGrid::cellFace(int cell, int local_index, int level) const
         : current_data_->back()->cell_to_face_[cpgrid::EntityRep<0>(cell, true)][local_index].index();
 }
 
-std::array<std::vector<std::set<int>>,2> CpGrid::vertexCell() const
+std::array<std::vector<std::set<int>>,2> CpGrid::vertexCell(int level) const
 {
     // Vertex <-> cell adjacency via the faces: every node of every face of a
     // cell counts, not only the eight canonical corners, so hanging nodes on
     // corner-point grids are included.
-    const int nc = numCells();
-    const int nv = this->numVertices();
-    std::vector<std::set<int>> vertex_cell(nv);
+    const bool validLevel = (level > -1) && (level <= maxLevel());
+    const auto& data = validLevel ? *currentData()[level] : *current_data_->back();
+    const int nc = data.size(0);
+    std::vector<std::set<int>> vertex_cell(data.size(3));
     std::vector<std::set<int>> cell_vertex(nc);
     for (int cell = 0; cell < nc; ++cell) {
-        const int nlf = numCellFaces(cell);
-        for (int lf = 0; lf < nlf; ++lf) {
-            const int face = this->cellFace(cell, lf);
-            const int nlv = numFaceVertices(face);
-            for (int lv = 0; lv < nlv; ++lv) {
-                const int vertex = faceVertex(face, lv);
+        for (const auto& face : data.cell_to_face_[cpgrid::EntityRep<0>(cell, true)]) {
+            for (const int vertex : data.face_to_point_[face.index()]) {
                 vertex_cell[vertex].insert(cell);
                 cell_vertex[cell].insert(vertex);
             }
