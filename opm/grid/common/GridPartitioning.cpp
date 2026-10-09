@@ -453,7 +453,7 @@ void addOverlapLayer(const CpGrid& grid,
                                     level);
 
                 }
-                else if (addCornerCells) {
+                else if (addCornerCells && !vertex_cell_maps[1].empty()) {
                     // Add every cell sharing ANY vertex with this cell to the
                     // overlap.  The vertex adjacency comes from vertexCell(),
                     // which walks the faces, so hanging nodes on corner-point
@@ -467,6 +467,27 @@ void addOverlapLayer(const CpGrid& grid,
                                 // face-neighbour path records as well.
                                 exportList.emplace_back(cell, owner, AttributeSet::copy);
                                 exportList.emplace_back(index, cell_part[cell], AttributeSet::copy);
+                            }
+                        }
+                    }
+                }
+                else if (addCornerCells) {
+                    // Add cells to the overlap that just share a corner with e.
+                    auto iit2 = validLevel? iit->outside().ilevelbegin() : iit->outside().ileafbegin();
+                    const auto& endIit2 = validLevel?  iit->outside().ilevelend() :  iit->outside().ileafend();
+
+                    for (; iit2 != endIit2; ++iit2) {
+                        if ( iit2->neighbor() )
+                        {
+                            int nb_index2 = ix.index(iit2->outside());
+                            if( cell_part[nb_index2]!=owner ) {
+                                addOverlapCornerCell(grid,
+                                                     owner,
+                                                     e,
+                                                     iit2->outside(),
+                                                     cell_part,
+                                                     exportList,
+                                                     level);
                             }
                         }
                     }
@@ -572,9 +593,9 @@ int addOverlapLayer([[maybe_unused]] const CpGrid& grid,
 
     auto it = validLevel?  grid.template lbegin<0>(level) : grid.template leafbegin<0>();
     const auto& endIt = validLevel?  grid.template lend<0>(level) : grid.template leafend<0>();
-    // Only corner cells need the vertex adjacency, of the view being distributed.
-    const auto vertex_cell_maps = addCornerCells ? grid.vertexCell(level)
-                                                 : std::array<std::vector<std::set<int>>,2>{};
+    // Vertex adjacency of the view being distributed, only when corner cells go by vertex.
+    const auto vertex_cell_maps = (addCornerCells && grid.cornerCellsByVertex())
+        ? grid.vertexCell(level) : std::array<std::vector<std::set<int>>,2>{};
     for (; it != endIt; ++it) {
         int index = ix.index(*it);
         auto owner = cell_part[index];

@@ -776,6 +776,19 @@ namespace Dune
             return partition_cell_groups_;
         }
 
+        /// \brief With corner cells requested from loadBalance(), add every cell sharing a vertex
+        /// with an overlap cell, hanging nodes and fault crossings included, rather than corner
+        /// neighbours two faces away. Vertex-based discretisations need it.
+        void setCornerCellsByVertex(bool byVertex)
+        {
+            corner_cells_by_vertex_ = byVertex;
+        }
+
+        bool cornerCellsByVertex() const
+        {
+            return corner_cells_by_vertex_;
+        }
+
         // loadbalance is not part of the grid interface therefore we skip it.
 
         /// \brief Distributes this grid over the available nodes in a distributed machine
@@ -1577,6 +1590,7 @@ namespace Dune
         std::shared_ptr<Opm::Refinement::Builder> refinement_builder_;
         std::vector<std::set<int>> partition_cell_groups_;
         int partition_cell_group_halo_{0};
+        bool corner_cells_by_vertex_{false};
         /**
          * @brief Interface for scattering and gathering cell data.
          *
