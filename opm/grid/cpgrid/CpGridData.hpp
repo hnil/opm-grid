@@ -401,6 +401,14 @@ public:
     /// See CpGrid::stableCellId().
     std::vector<std::int64_t> stableCellId() const;
 
+    /// See CpGrid::processEclipseFormatCoarsened(). Faces inside a block are dropped and the
+    /// rest kept as they are; collapse_coarse_faces merges the faces between two blocks.
+    void processEclipseFormatCoarsened(const grdecl& input_data,
+                                       const std::vector<int>& blockOfCartesian,
+                                       const std::vector<std::array<int,6>>& blockBox,
+                                       bool edge_conformal,
+                                       bool collapse_coarse_faces = false);
+
     /// @brief Check all cells selected for refinement have no NNCs (no neighbor connections).
     ///        Assumption: all grid cells are active.
     bool hasNNCs(const std::vector<int>& cellIndices) const;
