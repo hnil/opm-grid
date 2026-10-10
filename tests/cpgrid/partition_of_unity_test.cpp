@@ -32,6 +32,8 @@
 #include <opm/input/eclipse/EclipseState/Grid/EclipseGrid.hpp>
 
 #include <array>
+#include <map>
+#include <set>
 #include <vector>
 
 
@@ -83,6 +85,22 @@ Opm::EclipseGrid faultedGrid(const int nx, const int ny, const int nz)
     }
 
     return Opm::EclipseGrid(std::array<int, 3>{nx, ny, nz}, coord, zcorn);
+}
+
+/// Vertical slabs of columns, so the fault plane (i == nx/2) is a processor
+/// boundary; with four ranks or more also split at j == ny/2.
+std::vector<int> faultSlabParts(const Dune::CpGrid& grid, const int nx, const int ny, const int size)
+{
+    std::vector<int> parts(grid.size(0));
+    const auto& gv = grid.leafGridView();
+    for (const auto& element : elements(gv)) {
+        const int cell = gv.indexSet().index(element);
+        const auto center = element.geometry().center();
+        const int i = static_cast<int>(center[0]); // unit lattice
+        const int j = static_cast<int>(center[1]);
+        parts[cell] = (size >= 4) ? (i >= nx / 2) + 2 * (j >= ny / 2) : (i >= nx / 2);
+    }
+    return parts;
 }
 
 /// Codim-3 data handle: senders write their rank for every vertex in the
@@ -161,21 +179,7 @@ BOOST_AUTO_TEST_CASE(FaultedGridVerticesReached)
                               /* pinchActive = */ false,
                               /* edge_conformal = */ false);
 
-    // Partition in vertical slabs of columns so the fault plane (i == nx/2)
-    // coincides with a processor boundary.
-    std::vector<int> parts(grid.size(0));
-    const auto& gv = grid.leafGridView();
-    for (const auto& element : elements(gv)) {
-        const int cell = gv.indexSet().index(element);
-        const auto center = element.geometry().center();
-        const int i = static_cast<int>(center[0]); // unit lattice
-        const int j = static_cast<int>(center[1]);
-        if (size >= 4) {
-            parts[cell] = (i >= nx / 2) + 2 * (j >= ny / 2);
-        } else {
-            parts[cell] = (i >= nx / 2);
-        }
-    }
+    const auto parts = faultSlabParts(grid, nx, ny, size);
 
     grid.setCornerCellsByVertex(true);
     grid.loadBalance(parts, /* ownersFirst = */ false,
@@ -208,6 +212,68 @@ BOOST_AUTO_TEST_CASE(FaultedGridVerticesReached)
                         " interface)");
 }
 
+// With corner cells by vertex, every interior cell has all cells sharing a vertex with it on
+// its rank, hanging nodes on the fault included; corner cells two faces away miss some where
+// four ranks meet on the fault.
+BOOST_AUTO_TEST_CASE(CornerCellsByVertexAcrossFault)
+{
+    const auto& helper = Dune::MPIHelper::instance(
+        boost::unit_test::framework::master_test_suite().argc,
+        boost::unit_test::framework::master_test_suite().argv);
+    const int size = helper.size();
+    if (size != 4) {
+        return; // one quadrant per rank
+    }
+
+    const int nx = 4, ny = 4, nz = 2;
+    const auto eclGrid = faultedGrid(nx, ny, nz);
+    const auto process = [&eclGrid](Dune::CpGrid& grid) {
+        grid.processEclipseFormat(&eclGrid, nullptr, false, false, false, false, false);
+    };
+
+    // Vertex neighbours of each cell in the serial grid, by Cartesian index.
+    Dune::CpGrid serial(MPI_COMM_SELF);
+    process(serial);
+    const auto adjacency = serial.vertexCell();
+    std::map<int, std::set<int>> neighbours;
+    for (int cell = 0; cell < serial.size(0); ++cell) {
+        for (const int vertex : adjacency[1][cell]) {
+            for (const int other : adjacency[0][vertex]) {
+                neighbours[serial.globalCell()[cell]].insert(serial.globalCell()[other]);
+            }
+        }
+    }
+
+    const auto missing = [&](bool byVertex) {
+        Dune::CpGrid grid;
+        process(grid);
+        std::vector<int> parts(grid.size(0));
+        for (const auto& element : elements(grid.leafGridView())) {
+            const auto center = element.geometry().center();
+            const int qi = center[0] >= nx / 2;
+            const int qj = center[1] >= ny / 2;
+            parts[element.index()] = qi + 2 * qj;
+        }
+        grid.setCornerCellsByVertex(byVertex);
+        grid.loadBalance(parts, false, /* addCornerCells = */ true, /* overlapLayers = */ 1);
+
+        const std::set<int> present(grid.globalCell().begin(), grid.globalCell().end());
+        int count = 0;
+        for (const auto& element : elements(grid.leafGridView(), Dune::Partitions::interior)) {
+            for (const int n : neighbours.at(grid.globalCell()[element.index()])) {
+                count += present.count(n) == 0;
+            }
+        }
+        return grid.comm().sum(count);
+    };
+
+    const int byVertex = missing(true);
+    const int twoFacesAway = missing(false);
+    BOOST_TEST_MESSAGE("vertex neighbours missing: by vertex " << byVertex
+                       << ", two faces away " << twoFacesAway);
+    BOOST_CHECK_EQUAL(byVertex, 0);
+    BOOST_CHECK_GT(twoFacesAway, 0);
+}
 
 bool
 init_unit_test_func()
