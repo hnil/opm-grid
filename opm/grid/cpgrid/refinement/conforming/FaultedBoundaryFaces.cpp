@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 
 namespace Opm
 {
@@ -76,6 +77,46 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         if (across) {
             miniStart[p] = std::min(miniStart[p], (*across)[p][0]);
             miniEnd[p]   = std::max(miniEnd[p], (*across)[p][1] + 1);
+        }
+    }
+    // A throw larger than one layer puts the box face against shell cells
+    // further up or down: take every shell cell whose depth range overlaps it.
+    if (axis < 2) {
+        const auto z = [&](int i, int j, int k, int di, int dj, int dk) {
+            return zcorn[(2*i + di) + 2*parentDims[0]*((2*j + dj) + 2*parentDims[1]*(2*k + dk))];
+        };
+        const int boxLayer = (side < 0) ? boxStartIJK[axis] : boxEndIJK[axis] - 1;
+        const int shellLayer = (side < 0) ? boxLayer - 1 : boxLayer + 1;
+        const int faceCorner = (side < 0) ? 0 : 1;
+        const int other = 1 - axis;
+        double zmin = std::numeric_limits<double>::max();
+        double zmax = std::numeric_limits<double>::lowest();
+        for (int q = boxStartIJK[other]; q < boxEndIJK[other]; ++q) {
+            for (int dq = 0; dq < 2; ++dq) {
+                for (int dz = 0; dz < 2; ++dz) {
+                    const int k = dz ? boxEndIJK[2] - 1 : boxStartIJK[2];
+                    const double v = (axis == 0) ? z(boxLayer, q, k, faceCorner, dq, dz)
+                                                 : z(q, boxLayer, k, dq, faceCorner, dz);
+                    zmin = std::min(zmin, v);
+                    zmax = std::max(zmax, v);
+                }
+            }
+        }
+        for (int q = miniStart[other]; q < miniEnd[other]; ++q) {
+            for (int k = 0; k < parentDims[2]; ++k) {
+                double top = std::numeric_limits<double>::max();
+                double bottom = std::numeric_limits<double>::lowest();
+                for (int c = 0; c < 8; ++c) {
+                    const double v = (axis == 0) ? z(shellLayer, q, k, c & 1, (c >> 1) & 1, c >> 2)
+                                                 : z(q, shellLayer, k, c & 1, (c >> 1) & 1, c >> 2);
+                    top = std::min(top, v);
+                    bottom = std::max(bottom, v);
+                }
+                if (bottom > zmin && top < zmax) {
+                    miniStart[2] = std::min(miniStart[2], k);
+                    miniEnd[2] = std::max(miniEnd[2], k + 1);
+                }
+            }
         }
     }
 

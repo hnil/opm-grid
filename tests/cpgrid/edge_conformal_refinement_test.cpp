@@ -28,6 +28,7 @@
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/CpGridData.hpp>
+#include <opm/grid/cpgrid/GeometricCheck.hpp>
 #include <opm/grid/cpgrid/refinement/conforming/ConformingBlockBuilder.hpp>
 #include <opm/grid/cpgrid/refinement/GridStateWriter.hpp>
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
@@ -343,4 +344,65 @@ BOOST_AUTO_TEST_CASE(refineBoxBoundaryOnFaultBuilds)
     BOOST_REQUIRE_NO_THROW(grid.addLgrsUpdateLeafView({{2,2,2}}, {{0,0,0}}, {{2,2,2}}, {"LGR1"}));
     BOOST_CHECK_EQUAL(grid.maxLevel(), 1);
     BOOST_CHECK_CLOSE(totalVolume(grid), v0, 1e-8);
+}
+
+namespace
+{
+// Refine box [lo,hi) (edge-conformal throughout) and check the leaf.
+Dune::cpgrid::GeometricCheck refinedCheck(const TestGrdecl& g, const std::array<int,3>& lo,
+                                          const std::array<int,3>& hi,
+                                          const std::array<int,3>& factors = {3,3,2})
+{
+    Dune::CpGrid grid;
+    auto raw = g.raw();
+    grid.processEclipseFormat(raw, false, false, /*edge_conformal*/ true);
+    BOOST_REQUIRE(Dune::cpgrid::checkGeometric(grid).ok());
+    useConformingBuilder(grid, std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        g.dims, g.coord, g.zcorn, g.actnum, true));
+    grid.addLgrsUpdateLeafView({factors}, {lo}, {hi}, {"LGR1"});
+    const auto check = Dune::cpgrid::checkGeometric(grid);
+    BOOST_TEST_MESSAGE(check.summary());
+    return check;
+}
+} // namespace
+
+// Pillars that slant differently put the refined nodes ~1e-8 of the edge
+// length off the coarse neighbours' straight edges; they still belong there.
+BOOST_AUTO_TEST_CASE(refinedBoxOnSlantedPillarsIsGeometric)
+{
+    auto g = makeGrid({5, 5, 4}, [](int i_, int j_, int k_) {
+        return 2537.123 + 5.017*(cellOf(k_) + sideOf(k_)) + 0.31*(cellOf(i_) + sideOf(i_))
+             + 0.17*(cellOf(j_) + sideOf(j_));
+    });
+    for (int j = 0; j <= 5; ++j) {
+        for (int i = 0; i <= 5; ++i) {
+            double* p = &g.coord[6*(j*6 + i)];
+            p[0] = 2000.0 + 100.0123*i + 3.7*j;  p[1] = 3000.0 + 99.97*j + 1.3*i;  p[2] = 2400.0;
+            p[3] = p[0] + 7.1 + 0.3*i;           p[4] = p[1] - 4.3 + 0.2*j;        p[5] = 2800.0;
+        }
+    }
+    BOOST_CHECK(refinedCheck(g, {1,1,1}, {3,3,3}, {5,5,1}).ok());
+}
+
+// A throw of more than one layer puts the box side against coarse cells
+// outside a one-cell halo; they must still get their part of the fault face.
+BOOST_AUTO_TEST_CASE(faultThrowBeyondOneLayerIsGeometric)
+{
+    auto g = makeGrid({4, 3, 6}, [](int i_, int, int k_) {
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base - 4.6 : base;
+    });
+    BOOST_CHECK(refinedCheck(g, {2,1,2}, {3,2,4}).ok());
+}
+
+// Next to a fault, edge-conformal processing puts extra nodes on a cell's full
+// face. That face is not a fault split: a box side on the domain boundary keeps
+// its faces.
+BOOST_AUTO_TEST_CASE(boxSideOnDomainNextToFaultIsGeometric)
+{
+    auto g = makeGrid({4, 3, 3}, [](int i_, int, int k_) {
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base + 0.6 : base;
+    });
+    BOOST_CHECK(refinedCheck(g, {2,0,1}, {4,3,2}).ok());
 }

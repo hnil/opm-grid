@@ -559,7 +559,8 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             for (auto pt = facePoints.begin(); pt != facePoints.end(); ++pt) {
                 actual.insert(*pt);
             }
-            if (actual != expected) {
+            // Edge-conformal faces may carry extra nodes on their edges.
+            if (!std::includes(actual.begin(), actual.end(), expected.begin(), expected.end())) {
                 neighbor = kFaultedSide;        // partial (faulted/degenerate) face
             }
             else {
@@ -1567,6 +1568,63 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                 target.push_back(cell);
             }
             childBoxOf[parentLevelOf[b]][parent] = b;   // parent cell (in its grid) is refined by b
+        }
+    }
+
+    // ----- A faulted box side needs the split faces of assembleLeafGrid ----
+    // The nested stitching below uses lattice neighbours, which is wrong across
+    // a throw (for flow as well as mechanics), so refuse instead.
+    {
+        auto& cellToFace0 = GridStateWriter::cellToFace(level0);
+        auto& cellToPoint0 = GridStateWriter::cellToPoint(level0);
+        auto& faceToPoint0 = GridStateWriter::faceToPoint(level0);
+        Dune::cpgrid::EntityVariableBase<enum face_tag>& faceTag0 = GridStateWriter::faceTag(level0);
+        for (int c = 0; c < numCells0; ++c) {
+            const int b = childBoxOf[0][c];
+            if (b < 0) {
+                continue;
+            }
+            const int cart = level0.globalCell()[c];
+            const std::array<int,3> ijk = { cart % dims0[0], (cart / dims0[0]) % dims0[1],
+                                            cart / (dims0[0]*dims0[1]) };
+            for (int axis = 0; axis < 3; ++axis) {
+                for (int side = -1; side <= 1; side += 2) {
+                    const int edge = (side < 0) ? requests[b].startIJK[axis] : requests[b].endIJK[axis] - 1;
+                    if (ijk[axis] != edge) {
+                        continue;
+                    }
+                    std::vector<int> faces;
+                    const auto row = cellToFace0[EntityRep<0>(c, true)];
+                    for (int e = 0; e < row.size(); ++e) {
+                        const enum face_tag tag = faceTag0.get(row[e].index());
+                        if (tag != NNC_FACE && axisOf(tag) == axis && row[e].orientation() == (side > 0)) {
+                            faces.push_back(row[e].index());
+                        }
+                    }
+                    bool faulted = faces.size() > 1;
+                    if (faces.size() == 1) {
+                        std::set<int> expected, actual;
+                        for (int corner = 0; corner < 8; ++corner) {
+                            const int bit = (corner >> axis) & 1;
+                            if (bit == (side > 0 ? 1 : 0)) {
+                                expected.insert(cellToPoint0[c][corner]);
+                            }
+                        }
+                        for (const int pt : faceToPoint0[faces[0]]) {
+                            actual.insert(pt);
+                        }
+                        faulted = !std::includes(actual.begin(), actual.end(),
+                                                 expected.begin(), expected.end());
+                    }
+                    if (faulted) {
+                        throw std::logic_error("Nested LGR: box '" + requests[b].name
+                            + "' has a faulted boundary at (" + std::to_string(ijk[0] + 1) + ","
+                            + std::to_string(ijk[1] + 1) + "," + std::to_string(ijk[2] + 1)
+                            + "), which nested refinement does not split yet. Move the box off "
+                              "the fault or use a single refinement level.");
+                    }
+                }
+            }
         }
     }
 
