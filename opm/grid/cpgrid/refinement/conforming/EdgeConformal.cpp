@@ -106,13 +106,16 @@ void edgeConformalizeLeaf(Dune::cpgrid::CpGridData& leaf)
                 continue;
             }
 
+            // On slanted pillars refined nodes sit ~1e-8 of the edge length off
+            // the straight coarse edge.
+            const double lineTol = std::max(tol, 1e-7 * std::sqrt(len2));
             // Candidate nodes: all buckets overlapping the edge's bounding box.
-            const long long x0 = std::llround(std::floor((std::min(P[a][0], P[b][0]) - lo[0] - tol) / h));
-            const long long x1 = std::llround(std::floor((std::max(P[a][0], P[b][0]) - lo[0] + tol) / h));
-            const long long y0 = std::llround(std::floor((std::min(P[a][1], P[b][1]) - lo[1] - tol) / h));
-            const long long y1 = std::llround(std::floor((std::max(P[a][1], P[b][1]) - lo[1] + tol) / h));
-            const long long z0 = std::llround(std::floor((std::min(P[a][2], P[b][2]) - lo[2] - tol) / h));
-            const long long z1 = std::llround(std::floor((std::max(P[a][2], P[b][2]) - lo[2] + tol) / h));
+            const long long x0 = std::llround(std::floor((std::min(P[a][0], P[b][0]) - lo[0] - lineTol) / h));
+            const long long x1 = std::llround(std::floor((std::max(P[a][0], P[b][0]) - lo[0] + lineTol) / h));
+            const long long y0 = std::llround(std::floor((std::min(P[a][1], P[b][1]) - lo[1] - lineTol) / h));
+            const long long y1 = std::llround(std::floor((std::max(P[a][1], P[b][1]) - lo[1] + lineTol) / h));
+            const long long z0 = std::llround(std::floor((std::min(P[a][2], P[b][2]) - lo[2] - lineTol) / h));
+            const long long z1 = std::llround(std::floor((std::max(P[a][2], P[b][2]) - lo[2] + lineTol) / h));
 
             mids.clear();
             for (long long bx = x0; bx <= x1; ++bx) {
@@ -138,7 +141,7 @@ void edgeConformalizeLeaf(Dune::cpgrid::CpGridData& leaf)
                             closest += P[a];
                             Coord diff = P[c];
                             diff -= closest;
-                            if (diff.two_norm() < tol) {
+                            if (diff.two_norm() < lineTol) {
                                 mids.emplace_back(t, c);
                             }
                         }
