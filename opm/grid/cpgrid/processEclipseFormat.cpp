@@ -527,7 +527,8 @@ namespace cpgrid
                                           const bool turn_normals,
                                           const bool pinchActive,
                                           const double tolerance_unique_points,
-                                          const bool edge_conformal)
+                                          const bool edge_conformal,
+                                          const double* pillar_bend)
     {
         if (ccobj_.rank() != 0) {
             OPM_THROW(std::logic_error, "Processing corner-point grid "
@@ -562,21 +563,23 @@ namespace cpgrid
                 is_aquifer_cell[global_index] = 1;
             }
 
-            process_ok = process_grdecl(static_cast<int>(pinchActive),
-                                        static_cast<int>(edge_conformal),
-                                        tolerance_unique_points,
-                                        &input_data,
-                                        is_aquifer_cell.data(),
-                                        &output);
+            process_ok = process_grdecl_bent(static_cast<int>(pinchActive),
+                                             static_cast<int>(edge_conformal),
+                                             tolerance_unique_points,
+                                             &input_data,
+                                             is_aquifer_cell.data(),
+                                             pillar_bend,
+                                             &output);
         }
         else
         {
-            process_ok = process_grdecl(static_cast<int>(pinchActive),
-                                        static_cast<int>(edge_conformal),
-                                        tolerance_unique_points,
-                                        &input_data,
-                                        /* is_aquifer_cell = */ nullptr,
-                                        &output);
+            process_ok = process_grdecl_bent(static_cast<int>(pinchActive),
+                                             static_cast<int>(edge_conformal),
+                                             tolerance_unique_points,
+                                             &input_data,
+                                             /* is_aquifer_cell = */ nullptr,
+                                             pillar_bend,
+                                             &output);
         }
 
         if (process_ok == 0) {

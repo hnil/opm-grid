@@ -349,6 +349,12 @@ namespace Dune
                                   bool turn_normals = false,
                                   bool edge_conformal = false);
 
+        /// As above, with bent pillars: pillarBend holds two depths per pillar (COORD order,
+        /// ZCORN's z); above the first and below the second the pillar is vertical. NaN = no bend.
+        void processEclipseFormat(const grdecl& input_data,
+                                  const std::vector<double>& pillarBend,
+                                  bool edge_conformal);
+
         /// Process grdecl input with the given pinch-out connections, as a deck run makes them.
         void processEclipseFormat(const grdecl& input_data,
                                   const std::set<std::pair<int,int>>& pinchNnc,

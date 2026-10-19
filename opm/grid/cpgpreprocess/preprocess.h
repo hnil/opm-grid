@@ -168,6 +168,20 @@ extern "C" {
                        struct processed_grid *out);
 
     /**
+     * As process_grdecl(), with bent pillars.  pillar_bend holds two depths
+     * per pillar, in COORD's pillar order and ZCORN's z convention: above the
+     * first and below the second the pillar continues vertically through its
+     * point at that depth.  NaN means no bend on that side; NULL, none at all.
+     */
+    int process_grdecl_bent(int                    pinchActive,
+                            int                    edge_conformal,
+                            double                 tol,
+                            const struct grdecl   *g,
+                            const int             *is_aquifer_cell,
+                            const double          *pillar_bend,
+                            struct processed_grid *out);
+
+    /**
      * Release memory resources acquired in previous grid processing using
      * function process_grdecl().
      *

@@ -1516,6 +1516,32 @@ void CpGrid::processEclipseFormat(const grdecl& input_data,
 }
 
 void CpGrid::processEclipseFormat(const grdecl& input_data,
+                                  const std::vector<double>& pillarBend,
+                                  const bool edge_conformal)
+{
+    const std::size_t npillars = static_cast<std::size_t>(input_data.dims[0] + 1)
+                               * (input_data.dims[1] + 1);
+    if (pillarBend.size() != 2*npillars) {
+        OPM_THROW(std::invalid_argument, "Pillar bends: need two depths per pillar, "
+                  + std::to_string(2*npillars) + ", got " + std::to_string(pillarBend.size()));
+    }
+    std::array<std::set<std::pair<int, int>>, 2> nnc;
+    current_data_->back()->processEclipseFormat(input_data,
+                                                nullptr,
+                                                nnc,
+                                                /* remove_ij_boundary = */ false,
+                                                /* turn_normals = */ false,
+                                                /* pinchActive = */ false,
+                                                /* tolerance_unique_ponts = */ 0.0,
+                                                edge_conformal,
+                                                pillarBend.data());
+
+    current_data_->back()->ccobj_.broadcast(current_data_->back()->logical_cartesian_size_.data(),
+                                            current_data_->back()->logical_cartesian_size_.size(),
+                                            0);
+}
+
+void CpGrid::processEclipseFormat(const grdecl& input_data,
                                   const std::set<std::pair<int,int>>& pinchNnc,
                                   const bool pinchActive,
                                   const bool edge_conformal)

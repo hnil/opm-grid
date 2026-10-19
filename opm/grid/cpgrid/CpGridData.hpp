@@ -306,6 +306,8 @@ public:
     /// \param[in] edge_conformal Whether or not to construct an
     /// edge-conformal grid.  Typically useful in geo-mechanical
     /// applications.
+    ///
+    /// \param[in] pillar_bend Optional bent pillars, see process_grdecl_bent().
     void processEclipseFormat(const grdecl& input_data,
                               Opm::EclipseState* ecl_state,
                               std::array<std::set<std::pair<int, int>>, 2>& nnc,
@@ -313,7 +315,8 @@ public:
                               bool turn_normals,
                               bool pinchActive,
                               double tolerance_unique_points,
-                              bool edge_conformal);
+                              bool edge_conformal,
+                              const double* pillar_bend = nullptr);
 
     /// @brief
     ///    Extract Cartesian index triplet (i,j,k) of an active cell.

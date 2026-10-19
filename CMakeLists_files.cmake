@@ -95,6 +95,7 @@ list(APPEND MAIN_SOURCE_FILES
 list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/distribution_test.cpp
   tests/cpgrid/geometric_check_test.cpp
+  tests/cpgrid/pillar_bend_test.cpp
   tests/cpgrid/partition_of_unity_test.cpp
   tests/cpgrid/lgr_backend_comparison_test.cpp
   tests/cpgrid/lgr_backend_switch_test.cpp

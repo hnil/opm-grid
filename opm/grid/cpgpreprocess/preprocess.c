@@ -1109,7 +1109,20 @@ int process_grdecl(int                    pinchActive,
                    const int             *is_aquifer_cell,
                    struct processed_grid *out)
 {
+    return process_grdecl_bent(pinchActive, edge_conformal, tolerance,
+                               in, is_aquifer_cell, NULL, out);
+}
+
+int process_grdecl_bent(int                    pinchActive,
+                        int                    edge_conformal,
+                        double                 tolerance,
+                        const struct grdecl   *in,
+                        const int             *is_aquifer_cell,
+                        const double          *pillar_bend,
+                        struct processed_grid *out)
+{
     struct grdecl g = {0};
+    double *bend = NULL;
 
     size_t i;
     int    sign, error, left_handed;
@@ -1218,7 +1231,23 @@ int process_grdecl(int                    pinchActive,
         return 0;
     }
 
-    finduniquepoints(&g, plist, tolerance, out);
+    if (pillar_bend != NULL) {
+        /* ZCORN was multiplied by sign above; the bends follow it. */
+        const size_t np = ((size_t) nx + 1) * ((size_t) ny + 1);
+        bend = malloc(2 * np * sizeof *bend);
+        if (bend == NULL) {
+            free(plist);
+            free(zcorn);
+            free(actnum);
+            return 0;
+        }
+        for (i = 0; i < np; ++i) {
+            bend[2*i + 0] = (sign == 1) ? pillar_bend[2*i + 0] : -pillar_bend[2*i + 1];
+            bend[2*i + 1] = (sign == 1) ? pillar_bend[2*i + 1] : -pillar_bend[2*i + 0];
+        }
+    }
+    finduniquepoints_bent(&g, plist, tolerance, bend, out);
+    free(bend);
 
     free(zcorn);  zcorn  = NULL;
     free(actnum); actnum = NULL;

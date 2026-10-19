@@ -271,7 +271,15 @@ int finduniquepoints(const struct grdecl *g,
                                             * each pillar*/
                      double tolerance,
                      struct processed_grid *out)
+{
+    return finduniquepoints_bent(g, plist, tolerance, NULL, out);
+}
 
+int finduniquepoints_bent(const struct grdecl *g,
+                          int           *plist,
+                          double tolerance,
+                          const double *bend,
+                          struct processed_grid *out)
 {
 
     const int nx = out->dimensions[0];
@@ -330,7 +338,17 @@ int finduniquepoints(const struct grdecl *g,
             /* Assign unique points */
             for (k=0; k<len; ++k){
                 pt[2] = zout[k];
-                interpolate_pillar(coord, pt);
+                if (bend != NULL) {
+                    const double *b = bend + 2*(i + j*(g->dims[0] + 1));
+                    double q[3] = {0.0, 0.0, zout[k]};
+                    if (b[0] == b[0] && q[2] < b[0]) { q[2] = b[0]; }
+                    if (b[1] == b[1] && q[2] > b[1]) { q[2] = b[1]; }
+                    interpolate_pillar(coord, q);
+                    pt[0] = q[0];
+                    pt[1] = q[1];
+                } else {
+                    interpolate_pillar(coord, pt);
+                }
                 pt += 3;
             }
 

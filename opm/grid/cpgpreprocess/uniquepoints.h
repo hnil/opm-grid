@@ -40,6 +40,15 @@ int finduniquepoints(const struct grdecl *g,  /* input */
                      double               t,  /* tolerance*/
                      struct processed_grid *out);
 
+/* As finduniquepoints(); bend, if not NULL, holds two depths per pillar in the
+ * signed z of g->zcorn, NaN for none: above the first and below the second the
+ * pillar continues vertically. */
+int finduniquepoints_bent(const struct grdecl *g,
+                          int                 *p,
+                          double               t,
+                          const double        *bend,
+                          struct processed_grid *out);
+
 #endif /* OPM_UNIQUEPOINTS_HEADER */
 
 /* Local Variables:    */
