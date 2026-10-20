@@ -1462,8 +1462,16 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              const bool clip_z,
                              const bool pinchActive,
                              const bool edge_conformal,
-                             const double merge_tolerance)
+                             const double merge_tolerance,
+                             const std::vector<double>& pillarBend)
 {
+    if (!pillarBend.empty() && ecl_grid != nullptr) {
+        const std::size_t npillars = (ecl_grid->getNX() + 1)*(ecl_grid->getNY() + 1);
+        if (pillarBend.size() != 2*npillars) {
+            OPM_THROW(std::invalid_argument, "Pillar bends: need two depths per pillar, "
+                      + std::to_string(2*npillars) + ", got " + std::to_string(pillarBend.size()));
+        }
+    }
     auto removed_cells = current_data_->back()->
         processEclipseFormat(ecl_grid, ecl_state,
                              periodic_extension,
@@ -1471,7 +1479,8 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              clip_z,
                              pinchActive,
                              edge_conformal,
-                             merge_tolerance);
+                             merge_tolerance,
+                             pillarBend.empty() ? nullptr : pillarBend.data());
 
     current_data_->back()->ccobj_.broadcast(current_data_->back()->logical_cartesian_size_.data(),
                                             current_data_->back()->logical_cartesian_size_.size(),

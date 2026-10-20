@@ -276,7 +276,8 @@ public:
                          bool clip_z = false,
                          bool pinchActive = true,
                          bool edge_conformal = false,
-                         double merge_tolerance = 0.0);
+                         double merge_tolerance = 0.0,
+                         const double* pillar_bend = nullptr);
 
     /// Read the Eclipse grid format ('grdecl').
     ///

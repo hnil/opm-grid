@@ -145,8 +145,12 @@ namespace cpgrid
                                      const bool clip_z,
                                      const bool pinchActive,
                                      const bool edge_conformal,
-                                     const double merge_tolerance)
+                                     const double merge_tolerance,
+                                     const double* pillar_bend)
     {
+        if (pillar_bend != nullptr && periodic_extension) {
+            OPM_THROW(std::invalid_argument, "Bent pillars and a periodic extension cannot be combined");
+        }
         if (ccobj_.rank() != 0) {
             if (ecl_state != nullptr) {
                 // Handle potential exception during MINPV processing
@@ -509,7 +513,8 @@ namespace cpgrid
                                        turn_normals,
                                        pinchActive_copy,
                                        tolerance_unique_points,
-                                       edge_conformal);
+                                       edge_conformal,
+                                       pillar_bend);
         }
 
         return minpv_result.removed_cells;

@@ -27,6 +27,10 @@
 
 #include <dune/common/parallel/mpihelper.hh>
 
+#if HAVE_OPM_COMMON
+#include <opm/input/eclipse/EclipseState/Grid/EclipseGrid.hpp>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -168,3 +172,21 @@ BOOST_AUTO_TEST_CASE(WrongBendSizeThrows)
     BOOST_CHECK_THROW(grid.processEclipseFormat(g.view(), std::vector<double>(3, 0.0), true),
                       std::invalid_argument);
 }
+
+#if HAVE_OPM_COMMON
+BOOST_AUTO_TEST_CASE(EclipseGridRouteBendsTheSame)
+{
+    const Grid g(4.0);
+    const auto b = bends(10.0, 24.0);
+    Dune::CpGrid direct, viaEclipseGrid;
+    direct.processEclipseFormat(g.view(), b, /*edge_conformal*/ true);
+    const Opm::EclipseGrid ecl({nx, ny, nz}, g.coord, g.zcorn, g.actnum.data());
+    viaEclipseGrid.processEclipseFormat(&ecl, nullptr, false, false, false, false,
+                                        /*edge_conformal*/ true, 0.0, b);
+    const auto x = vertices(direct), y = vertices(viaEclipseGrid);
+    BOOST_REQUIRE_EQUAL(x.size(), y.size());
+    for (std::size_t n = 0; n < x.size(); ++n) {
+        BOOST_CHECK(x[n] == y[n]);
+    }
+}
+#endif

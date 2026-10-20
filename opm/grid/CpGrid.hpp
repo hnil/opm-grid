@@ -269,6 +269,8 @@ namespace Dune
         /// this on average are merged away like pinched cells, and pillar
         /// points closer than this become one node. The PINCH threshold is
         /// used when it is larger.
+        ///
+        /// \param[in] pillarBend Bent pillars, as in the grdecl overload below; empty for none.
         std::vector<std::size_t>
         processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              Opm::EclipseState* ecl_state,
@@ -277,7 +279,8 @@ namespace Dune
                              bool clip_z,
                              bool pinchActive,
                              bool edge_conformal,
-                             double merge_tolerance = 0.0);
+                             double merge_tolerance = 0.0,
+                             const std::vector<double>& pillarBend = {});
 
         /// Read the Eclipse grid format ('grdecl').
         ///
