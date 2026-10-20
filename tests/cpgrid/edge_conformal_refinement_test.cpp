@@ -448,3 +448,14 @@ BOOST_AUTO_TEST_CASE(throwInsideBoxOnSlantedPillarsCloses)
     BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,3}, {5,3,5}, {3,3,1}), 0);
     BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,3}, {3,3,5}, {3,3,1}), 0);
 }
+
+// A throw that changes sign along a fault inside the box: layers cross between
+// pillars, and the box's crossing node must be the level-zero one.
+BOOST_AUTO_TEST_CASE(layersCrossingInsideBoxShareNodes)
+{
+    auto g = makeGrid({4, 4, 6}, [](int i_, int j_, int k_) {
+        const double z = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(j_) >= 2) ? z - 3.0 + 2.5*(cellOf(i_) + sideOf(i_)) : z;
+    });
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,2}, {3,3,4}, {2,2,1}), 0);
+}
