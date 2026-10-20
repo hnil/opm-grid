@@ -84,7 +84,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            int side,
                            bool edgeConformal,
                            const std::array<std::array<int,2>,3>* across = nullptr,
-                           const std::array<int,2>* interiorK = nullptr);
+                           const std::array<int,2>* interiorK = nullptr,
+                           const std::array<int,3>* boxStart = nullptr);
 
 } // namespace Refinement
 } // namespace Opm
