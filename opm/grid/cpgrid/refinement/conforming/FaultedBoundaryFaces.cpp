@@ -256,6 +256,31 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                                      out.node_coordinates[3*node + 1],
                                      out.node_coordinates[3*node + 2] });
         }
+        if (axis < 2) {
+            // The side lies on a parent pillar row; u runs along it.
+            const int u = 1 - axis;
+            const int plane = boxL[axis] + (side > 0 ? 1 : 0);
+            const int col = boxL[u];
+            bc.pillarLine = parentOfMini(boxL)[axis] + (side > 0 ? 1 : 0);
+            bc.pillarPair = miniStart[u] + miniSub[u].parentOffset[col];
+            const double lo = miniSub[u].fracLo[col];
+            const double hi = miniSub[u].fracHi[col];
+            const auto pillarAt = [&](int c, double z) {
+                const int ip = (axis == 0) ? plane : c;
+                const int jp = (axis == 0) ? c : plane;
+                const double* q = &refined.coord[6*(static_cast<std::size_t>(jp)*(mdims[0] + 1) + ip)];
+                const double t = (q[5] != q[2]) ? (z - q[2]) / (q[5] - q[2]) : 0.0;
+                return std::array<double,2>{ q[0] + t*(q[3] - q[0]), q[1] + t*(q[4] - q[1]) };
+            };
+            for (const auto& nd : bc.faceNodes) {
+                const auto p0 = pillarAt(col, nd[2]);
+                const auto p1 = pillarAt(col + 1, nd[2]);
+                const double dx = p1[0] - p0[0];
+                const double dy = p1[1] - p0[1];
+                const double a = ((nd[0] - p0[0])*dx + (nd[1] - p0[1])*dy) / (dx*dx + dy*dy);
+                bc.nodeS.push_back(lo + a*(hi - lo));
+            }
+        }
         result.push_back(std::move(bc));
     }
 
