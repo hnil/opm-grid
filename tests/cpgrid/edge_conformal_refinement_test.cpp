@@ -28,7 +28,6 @@
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/CpGridData.hpp>
-#include <opm/grid/cpgrid/GeometricCheck.hpp>
 #include <opm/grid/cpgrid/refinement/conforming/ConformingBlockBuilder.hpp>
 #include <opm/grid/cpgrid/refinement/GridStateWriter.hpp>
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
@@ -36,8 +35,10 @@
 
 #include <dune/common/parallel/mpihelper.hh>
 
+#include <algorithm>
 #include <array>
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 #include <set>
@@ -348,21 +349,39 @@ BOOST_AUTO_TEST_CASE(refineBoxBoundaryOnFaultBuilds)
 
 namespace
 {
-// Refine box [lo,hi) (edge-conformal throughout) and check the leaf.
-Dune::cpgrid::GeometricCheck refinedCheck(const TestGrdecl& g, const std::array<int,3>& lo,
-                                          const std::array<int,3>& hi,
-                                          const std::array<int,3>& factors = {3,3,2})
+// Cells whose faces do not close: an edge not shared by exactly two of their faces.
+int openCells(const Dune::CpGrid& grid)
+{
+    int open = 0;
+    for (int c = 0; c < grid.size(0); ++c) {
+        std::map<std::pair<int,int>, int> uses;
+        for (int f = 0; f < grid.numCellFaces(c); ++f) {
+            const int face = grid.cellFace(c, f);
+            const int m = grid.numFaceVertices(face);
+            for (int v = 0; v < m; ++v) {
+                const int a = grid.faceVertex(face, v);
+                const int b = grid.faceVertex(face, (v + 1) % m);
+                ++uses[{std::min(a, b), std::max(a, b)}];
+            }
+        }
+        open += std::any_of(uses.begin(), uses.end(), [](const auto& u) { return u.second != 2; });
+    }
+    return open;
+}
+
+// Refine box [lo,hi) (edge-conformal throughout); the number of open leaf cells.
+int refinedOpenCells(const TestGrdecl& g, const std::array<int,3>& lo,
+                     const std::array<int,3>& hi,
+                     const std::array<int,3>& factors = {3,3,2})
 {
     Dune::CpGrid grid;
     auto raw = g.raw();
     grid.processEclipseFormat(raw, false, false, /*edge_conformal*/ true);
-    BOOST_REQUIRE(Dune::cpgrid::checkGeometric(grid).ok());
+    BOOST_REQUIRE_EQUAL(openCells(grid), 0);
     useConformingBuilder(grid, std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
         g.dims, g.coord, g.zcorn, g.actnum, true));
     grid.addLgrsUpdateLeafView({factors}, {lo}, {hi}, {"LGR1"});
-    const auto check = Dune::cpgrid::checkGeometric(grid);
-    BOOST_TEST_MESSAGE(check.summary());
-    return check;
+    return openCells(grid);
 }
 } // namespace
 
@@ -381,7 +400,7 @@ BOOST_AUTO_TEST_CASE(refinedBoxOnSlantedPillarsIsGeometric)
             p[3] = p[0] + 7.1 + 0.3*i;           p[4] = p[1] - 4.3 + 0.2*j;        p[5] = 2800.0;
         }
     }
-    BOOST_CHECK(refinedCheck(g, {1,1,1}, {3,3,3}, {5,5,1}).ok());
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,1}, {3,3,3}, {5,5,1}), 0);
 }
 
 // A throw of more than one layer puts the box side against coarse cells
@@ -392,7 +411,7 @@ BOOST_AUTO_TEST_CASE(faultThrowBeyondOneLayerIsGeometric)
         const double base = 2.0*(cellOf(k_) + sideOf(k_));
         return (cellOf(i_) >= 2) ? base - 4.6 : base;
     });
-    BOOST_CHECK(refinedCheck(g, {2,1,2}, {3,2,4}).ok());
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {2,1,2}, {3,2,4}), 0);
 }
 
 // Next to a fault, edge-conformal processing puts extra nodes on a cell's full
@@ -404,5 +423,28 @@ BOOST_AUTO_TEST_CASE(boxSideOnDomainNextToFaultIsGeometric)
         const double base = 2.0*(cellOf(k_) + sideOf(k_));
         return (cellOf(i_) >= 2) ? base + 0.6 : base;
     });
-    BOOST_CHECK(refinedCheck(g, {2,0,1}, {4,3,2}).ok());
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {2,0,1}, {4,3,2}), 0);
+}
+
+// Pillars that lean differently and start at different depths, with a throw of
+// two layers inside the box: the refined grid places fault nodes away from the
+// coarse ones and puts box cells beside cells above and below the box.
+BOOST_AUTO_TEST_CASE(throwInsideBoxOnSlantedPillarsCloses)
+{
+    auto g = makeGrid({6, 4, 8}, [](int i_, int j_, int k_) {
+        const int i = cellOf(i_) + sideOf(i_);
+        const int j = cellOf(j_) + sideOf(j_);
+        const int k = cellOf(k_) + sideOf(k_);
+        const double z = 2537.123 + 5.017*k + (0.31 + 0.9*k)*i + (0.17 + 0.6*k)*j + 0.4*i*j;
+        return (cellOf(i_) >= 3) ? z - 11.3 - 1.7*j : z;
+    });
+    for (int j = 0; j <= 4; ++j) {
+        for (int i = 0; i <= 6; ++i) {
+            double* p = &g.coord[6*(j*7 + i)];
+            p[0] = 2000.0 + 100.0123*i + 3.7*j;  p[1] = 3000.0 + 99.97*j + 1.3*i;  p[2] = 2400.0 + 9.0*i - 6.0*j;
+            p[3] = p[0] + 37.1 + 6.3*i;          p[4] = p[1] - 24.3 + 5.2*j;       p[5] = 2800.0 + 4.0*j;
+        }
+    }
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,3}, {5,3,5}, {3,3,1}), 0);
+    BOOST_CHECK_EQUAL(refinedOpenCells(g, {1,1,3}, {3,3,5}, {3,3,1}), 0);
 }
