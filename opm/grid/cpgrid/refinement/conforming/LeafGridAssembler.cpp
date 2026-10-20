@@ -207,14 +207,20 @@ PolyGeom polygonGeometry(const std::vector<std::array<double,3>>& pts)
     g.normal = 0.0;
     const int n = static_cast<int>(pts.size());
     for (int i = 0; i < n; ++i) {
-        const auto& a = pts[i];
-        const auto& b = pts[(i + 1) % n];
+        for (int d = 0; d < 3; ++d) g.center[d] += pts[i][d];
+    }
+    for (int d = 0; d < 3; ++d) g.center[d] /= (n > 0 ? n : 1);
+    // About the center, so round-off does not grow with the coordinates.
+    for (int i = 0; i < n; ++i) {
+        std::array<double,3> a, b;
+        for (int d = 0; d < 3; ++d) {
+            a[d] = pts[i][d] - g.center[d];
+            b[d] = pts[(i + 1) % n][d] - g.center[d];
+        }
         g.normal[0] += (a[1] - b[1]) * (a[2] + b[2]);
         g.normal[1] += (a[2] - b[2]) * (a[0] + b[0]);
         g.normal[2] += (a[0] - b[0]) * (a[1] + b[1]);
-        for (int d = 0; d < 3; ++d) g.center[d] += a[d];
     }
-    for (int d = 0; d < 3; ++d) g.center[d] /= (n > 0 ? n : 1);
     g.area = 0.5 * g.normal.two_norm();
     if (g.area > 0.0) g.normal /= g.normal.two_norm();  // unit
     return g;
