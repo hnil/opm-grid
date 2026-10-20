@@ -1210,7 +1210,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
 
             const auto conns = faultedBoundaryConnections(
                 parentDims, coord, zcorn, actnum, part, axis, side,
-                /*edgeConformal=*/true, &range);
+                /*edgeConformal=*/true, &range, &requests[b].startIJK);
             const auto& rd = boxes[b].refinedDims;
             const auto refinedCell = [&](std::array<int,3> lattice) {
                 return refinedCartToCell[b].find(lattice[0] + rd[0]*lattice[1]
