@@ -44,9 +44,11 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            int axis,
                            int side,
                            bool edgeConformal,
-                           const std::array<std::array<int,2>,3>* across)
+                           const std::array<std::array<int,2>,3>* across,
+                           const std::array<int,2>* interiorK)
 {
     std::vector<BoundaryConnection> result;
+    const bool interior = (interiorK != nullptr) && (axis < 2);
 
     // Mini region: the box, plus a one-cell coarse "shell" on the (axis, side)
     // side, plus a one-cell halo in the two perpendicular axes so a fault that
@@ -58,7 +60,11 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
 
     std::array<int,3> miniStart = boxStartIJK;
     std::array<int,3> miniEnd   = boxEndIJK;
-    if (side < 0) {
+    if (interior) {
+        miniStart[2] = std::min(miniStart[2], (*interiorK)[0]);
+        miniEnd[2] = std::max(miniEnd[2], (*interiorK)[1] + 1);
+    }
+    else if (side < 0) {
         miniStart[axis] -= 1;
         if (miniStart[axis] < 0) {
             return result; // shell off-grid: the box boundary is the domain edge
@@ -70,7 +76,7 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
             return result;
         }
     }
-    for (int p = 0; p < 3; ++p) {
+    for (int p = 0; p < 3 && !interior; ++p) {
         if (p == axis) continue;
         miniStart[p] = std::max(0, miniStart[p] - 1);
         miniEnd[p]   = std::min(parentDims[p], miniEnd[p] + 1);
@@ -81,7 +87,7 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
     }
     // A throw larger than one layer puts the box face against shell cells
     // further up or down: take every shell cell whose depth range overlaps it.
-    if (axis < 2) {
+    if (axis < 2 && !interior) {
         const auto z = [&](int i, int j, int k, int di, int dj, int dk) {
             return zcorn[(2*i + di) + 2*parentDims[0]*((2*j + dj) + 2*parentDims[1]*(2*k + dk))];
         };
@@ -138,7 +144,9 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
             const int parent = p - miniStart[d];
             const bool inside = (p >= boxStartIJK[d]) && (p < boxEndIJK[d]);
             const int first = inside ? boxPos.firstColumn[p - boxStartIJK[d]] : 0;
-            const int count = inside ? boxPos.parentCount[first] : box.cellsPerDim[d];
+            // Interior throws: the cells above and below stay whole in depth.
+            const int count = inside ? boxPos.parentCount[first]
+                                     : (interior ? 1 : box.cellsPerDim[d]);
 
             for (int sub = 0; sub < count; ++sub) {
                 mini.parentOffset.push_back(parent);
@@ -203,6 +211,10 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
             && p[2] >= boxStartIJK[2] && p[2] < boxEndIJK[2];
     };
 
+    const auto isBoxCell = [&](int slot) {
+        return slot >= 0 && inBox(parentOfMini(latticeOf(slot)));
+    };
+
     for (unsigned face = 0; face < out.number_of_faces; ++face) {
         if (out.face_tag[face] != axisFaceTag) {
             continue;
@@ -211,8 +223,17 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         // increasing `axis`. The box's boundary face toward `side` therefore has
         // the box cell on the high-axis slot for side<0, the low-axis slot for
         // side>0; the other slot is the coarse neighbour (or -1 at the domain).
-        const int boxSlot   = (side < 0) ? out.face_neighbors[2*face + 1] : out.face_neighbors[2*face];
-        const int otherSlot = (side < 0) ? out.face_neighbors[2*face]     : out.face_neighbors[2*face + 1];
+        int faceSide = side;
+        if (interior) {
+            const bool low = isBoxCell(out.face_neighbors[2*face]);
+            const bool high = isBoxCell(out.face_neighbors[2*face + 1]);
+            if (low == high) {
+                continue; // inside the box, or not touching it
+            }
+            faceSide = low ? 1 : -1;
+        }
+        const int boxSlot   = (faceSide < 0) ? out.face_neighbors[2*face + 1] : out.face_neighbors[2*face];
+        const int otherSlot = (faceSide < 0) ? out.face_neighbors[2*face]     : out.face_neighbors[2*face + 1];
         if (boxSlot < 0) {
             continue; // no box cell on this face
         }
@@ -225,7 +246,17 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
             || boxFrame[2] < 0 || boxFrame[2] >= boxRefDims[2]) {
             continue; // boxSlot is not a box cell
         }
-        if (boxFrame[axis] != boundaryLayer) {
+        if (interior) {
+            // An interior pillar row: the box continues across it.
+            const int beyond = boxFrame[axis] + faceSide;
+            const int sub = miniPos[axis].subIndex[boxL[axis]];
+            const int last = miniPos[axis].parentCount[boxL[axis]] - 1;
+            if (beyond < 0 || beyond >= boxRefDims[axis]
+                || sub != ((faceSide < 0) ? 0 : last)) {
+                continue;
+            }
+        }
+        else if (boxFrame[axis] != boundaryLayer) {
             continue; // not the box's (axis, side) boundary layer
         }
 
@@ -250,11 +281,37 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         bc.boxCell = boxFrame;
         bc.coarseNeighborCart = coarseCart;
         bc.coarseNeighborSub = coarseSub;
+        bc.side = faceSide;
         for (unsigned n = out.face_node_ptr[face]; n < out.face_node_ptr[face + 1]; ++n) {
             const int node = out.face_nodes[n];
             bc.faceNodes.push_back({ out.node_coordinates[3*node],
                                      out.node_coordinates[3*node + 1],
                                      out.node_coordinates[3*node + 2] });
+        }
+        if (axis < 2) {
+            // The side lies on a parent pillar row; u runs along it.
+            const int u = 1 - axis;
+            const int plane = boxL[axis] + (faceSide > 0 ? 1 : 0);
+            const int col = boxL[u];
+            bc.pillarLine = parentOfMini(boxL)[axis] + (faceSide > 0 ? 1 : 0);
+            bc.pillarPair = miniStart[u] + miniSub[u].parentOffset[col];
+            const double lo = miniSub[u].fracLo[col];
+            const double hi = miniSub[u].fracHi[col];
+            const auto pillarAt = [&](int c, double z) {
+                const int ip = (axis == 0) ? plane : c;
+                const int jp = (axis == 0) ? c : plane;
+                const double* q = &refined.coord[6*(static_cast<std::size_t>(jp)*(mdims[0] + 1) + ip)];
+                const double t = (q[5] != q[2]) ? (z - q[2]) / (q[5] - q[2]) : 0.0;
+                return std::array<double,2>{ q[0] + t*(q[3] - q[0]), q[1] + t*(q[4] - q[1]) };
+            };
+            for (const auto& nd : bc.faceNodes) {
+                const auto p0 = pillarAt(col, nd[2]);
+                const auto p1 = pillarAt(col + 1, nd[2]);
+                const double dx = p1[0] - p0[0];
+                const double dy = p1[1] - p0[1];
+                const double a = ((nd[0] - p0[0])*dx + (nd[1] - p0[1])*dy) / (dx*dx + dy*dy);
+                bc.nodeS.push_back(lo + a*(hi - lo));
+            }
         }
         result.push_back(std::move(bc));
     }

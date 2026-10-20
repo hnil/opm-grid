@@ -44,6 +44,13 @@ struct BoundaryConnection
                                      ///< the neighbour to a refined child cell when it
                                      ///< is itself refined (box<->box faulted interface).
     std::vector<std::array<double,3>> faceNodes; ///< face corner coordinates
+    /// For an I/J side: the face lies between parent pillars (pillarLine, pillarPair)
+    /// and (pillarLine, pillarPair + 1) along the side; nodeS[n] is node n's fraction
+    /// between them at its depth, measured on the refined pillars.
+    int side{0};                     ///< which face of boxCell: -1 low, +1 high
+    int pillarLine{-1};
+    int pillarPair{-1};
+    std::vector<double> nodeS;
 };
 
 /// Compute the connections at one box-boundary side using the corner-point
@@ -62,6 +69,11 @@ struct BoundaryConnection
 /// given, is the inclusive parent IJK range of the cells actually across the side;
 /// the mini region grows to cover it, since a large throw puts them outside the
 /// box's own layers.
+///
+/// With interiorK (axis 0 or 1, side ignored): the faces on the box's interior
+/// pillar rows between box cells and cells above or below the box in its
+/// footprint, which a throw inside the box brings side by side. interiorK is the
+/// inclusive layer range of those cells.
 std::vector<BoundaryConnection>
 faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const double* coord,
@@ -71,7 +83,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            int axis,
                            int side,
                            bool edgeConformal,
-                           const std::array<std::array<int,2>,3>* across = nullptr);
+                           const std::array<std::array<int,2>,3>* across = nullptr,
+                           const std::array<int,2>* interiorK = nullptr);
 
 } // namespace Refinement
 } // namespace Opm
