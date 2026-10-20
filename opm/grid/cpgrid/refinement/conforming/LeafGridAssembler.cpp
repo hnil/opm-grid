@@ -282,6 +282,62 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     auto& faceNormals0 = GridStateWriter::faceNormals(level0);
     const int numFaces0 = faceToCell0.size();
 
+    Dune::cpgrid::EntityVariableBase<enum face_tag>& tags0 = faceTag0;
+    const Dune::cpgrid::EntityVariableBase<Dune::cpgrid::Geometry<0,3>>& corners0 =
+        GridStateWriter::geometry(level0).geomVector(std::integral_constant<int,3>());
+
+    // Level-zero nodes on each pillar row segment by (fraction s, depth): the
+    // processor puts such a node at (1-s)*P1(z) + s*P2(z), the refined grid
+    // elsewhere, so a fault split is matched by (pillar pair, s, z).
+    const auto pillarXY = [&](int i, int j, double z) {
+        const double* q = coord + 6*(static_cast<std::size_t>(j)*(dims0[0] + 1) + i);
+        const double t = (q[5] != q[2]) ? (z - q[2]) / (q[5] - q[2]) : 0.0;
+        return std::array<double,2>{ q[0] + t*(q[3] - q[0]), q[1] + t*(q[4] - q[1]) };
+    };
+    const auto fractionOnRow = [&](int axis, int line, int pair, const std::array<double,3>& p) {
+        const auto p0 = (axis == 0) ? pillarXY(line, pair, p[2]) : pillarXY(pair, line, p[2]);
+        const auto p1 = (axis == 0) ? pillarXY(line, pair + 1, p[2]) : pillarXY(pair + 1, line, p[2]);
+        const double dx = p1[0] - p0[0];
+        const double dy = p1[1] - p0[1];
+        return ((p[0] - p0[0])*dx + (p[1] - p0[1])*dy) / (dx*dx + dy*dy);
+    };
+    std::map<std::array<int,3>, std::vector<std::pair<std::array<double,2>, int>>> rowNodes0;
+    for (int face = 0; face < numFaces0; ++face) {
+        const enum face_tag tag = tags0.get(face);
+        if (tag != I_FACE && tag != J_FACE) {
+            continue;
+        }
+        const int axis = axisOf(tag);
+        const auto cells = faceToCell0[EntityRep<1>(face, true)];
+        if (cells.size() == 0 || cells[0].index() == kRemoteCell) {
+            continue;
+        }
+        const int cart = level0.globalCell()[cells[0].index()];
+        const std::array<int,2> ij = { cart % dims0[0], (cart / dims0[0]) % dims0[1] };
+        const int line = ij[axis] + (cells[0].orientation() ? 1 : 0);
+        const int pair = ij[1 - axis];
+        auto& list = rowNodes0[{axis, line, pair}];
+        for (const int node : faceToPoint0[face]) {
+            const auto& c = corners0[node].center();
+            const std::array<double,3> p{ c[0], c[1], c[2] };
+            list.push_back({ { fractionOnRow(axis, line, pair, p), p[2] }, node });
+        }
+    }
+    // Rounding only: both sides evaluate the same lines. Still a tolerance; exact
+    // would key a crossing by its two lines, as facetopology.c finds it.
+    constexpr double sameParam = 1e-9;
+    const auto rowNode0 = [&](const std::array<int,3>& row, double s, double z) {
+        const auto it = rowNodes0.find(row);
+        if (it != rowNodes0.end()) {
+            for (const auto& [sz, node] : it->second) {
+                if (std::abs(sz[0] - s) <= sameParam && std::abs(sz[1] - z) <= sameParam) {
+                    return node;
+                }
+            }
+        }
+        return -1;
+    };
+
     // ----- Per-box data -------------------------------------------------
     struct BoxData
     {
@@ -371,6 +427,47 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                 }
             }
         }
+        // A node the box adds on a parent row (where a fault's layers cross) is
+        // the level-zero node there; matched as the rebuilt fault faces are.
+        std::set<int> claimed;
+        for (const int node : box.cornerEquiv) {
+            claimed.insert(node);
+        }
+        auto& cellToFaceL = GridStateWriter::cellToFace(*box.level);
+        auto& faceToPointL = GridStateWriter::faceToPoint(*box.level);
+        Dune::cpgrid::EntityVariableBase<enum face_tag>& tagsL = GridStateWriter::faceTag(*box.level);
+        const Dune::cpgrid::EntityVariableBase<Dune::cpgrid::Geometry<0,3>>& cornersL =
+            GridStateWriter::geometry(*box.level).geomVector(std::integral_constant<int,3>());
+        for (int cell = 0; cell < box.level->size(0); ++cell) {
+            const int pcart = level0.globalCell()[childToParent[cell][1]];
+            const std::array<int,2> pij = { pcart % dims0[0], (pcart / dims0[0]) % dims0[1] };
+            const int refinedCart = box.level->globalCell()[cell];
+            const std::array<int,2> lattice = { refinedCart % rd[0], (refinedCart / rd[0]) % rd[1] };
+            const auto faces = cellToFaceL[EntityRep<0>(cell, true)];
+            for (int e = 0; e < faces.size(); ++e) {
+                const enum face_tag tag = tagsL.get(faces[e].index());
+                if (tag != I_FACE && tag != J_FACE) {
+                    continue;
+                }
+                const int axis = axisOf(tag);
+                const int edge = box.pos[axis].subIndex[lattice[axis]] + (faces[e].orientation() ? 1 : 0);
+                if (edge != 0 && edge != box.pos[axis].parentCount[lattice[axis]]) {
+                    continue;
+                }
+                const std::array<int,3> row{ axis, pij[axis] + (edge == 0 ? 0 : 1), pij[1 - axis] };
+                for (const int node : faceToPointL[faces[e].index()]) {
+                    if (box.cornerEquiv[node] >= 0) {
+                        continue;
+                    }
+                    const auto& c = cornersL[node].center();
+                    const std::array<double,3> p{ c[0], c[1], c[2] };
+                    const int node0 = rowNode0(row, fractionOnRow(axis, row[1], row[2], p), p[2]);
+                    if (node0 >= 0 && claimed.insert(node0).second) {
+                        box.cornerEquiv[node] = node0;
+                    }
+                }
+            }
+        }
     }
 
     // ----- Corner pool (D1) ----------------------------------------------
@@ -379,8 +476,6 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     auto& leafGeometry = GridStateWriter::geometry(*leaf);
     Dune::cpgrid::EntityVariableBase<Dune::cpgrid::Geometry<0,3>>& leafCorners =
         leafGeometry.geomVector(std::integral_constant<int,3>());
-    const Dune::cpgrid::EntityVariableBase<Dune::cpgrid::Geometry<0,3>>& corners0 =
-        GridStateWriter::geometry(level0).geomVector(std::integral_constant<int,3>());
     leafCorners.assign(corners0.begin(), corners0.end());
 
     std::vector<std::array<int,2>> leafCornerHistory(numCorners0);
@@ -487,7 +582,6 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     // level-zero face that is the parent's *full* logical face (its four
     // lattice corners); otherwise the block boundary is faulted/degenerate
     // and the refined mosaic cannot replace it (unsupported, throw).
-    Dune::cpgrid::EntityVariableBase<enum face_tag>& tags0 = faceTag0;
     std::map<std::tuple<int,int,int>, int> verifiedNeighbor;
     const auto outsideNeighborOf = [&](int b, int parent, int axis, int side) {
         (void)b;
@@ -919,45 +1013,6 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             cornerByCoord[coordKey(leafCorners[c])] = c;
         }
 
-        // Level-zero nodes on each pillar row segment by (fraction s, depth): the
-        // processor puts such a node at (1-s)*P1(z) + s*P2(z), the refined grid
-        // elsewhere, so a fault split is matched by (pillar pair, s, z).
-        const auto pillarXY = [&](int i, int j, double z) {
-            const double* q = coord + 6*(static_cast<std::size_t>(j)*(dims0[0] + 1) + i);
-            const double t = (q[5] != q[2]) ? (z - q[2]) / (q[5] - q[2]) : 0.0;
-            return std::array<double,2>{ q[0] + t*(q[3] - q[0]), q[1] + t*(q[4] - q[1]) };
-        };
-        const auto fractionOnRow = [&](int axis, int line, int pair, const std::array<double,3>& p) {
-            const auto p0 = (axis == 0) ? pillarXY(line, pair, p[2]) : pillarXY(pair, line, p[2]);
-            const auto p1 = (axis == 0) ? pillarXY(line, pair + 1, p[2]) : pillarXY(pair + 1, line, p[2]);
-            const double dx = p1[0] - p0[0];
-            const double dy = p1[1] - p0[1];
-            return ((p[0] - p0[0])*dx + (p[1] - p0[1])*dy) / (dx*dx + dy*dy);
-        };
-        std::map<std::array<int,3>, std::vector<std::pair<std::array<double,2>, int>>> rowNodes0;
-        for (int face = 0; face < numFaces0; ++face) {
-            const enum face_tag tag = tags0.get(face);
-            if (tag != I_FACE && tag != J_FACE) {
-                continue;
-            }
-            const int axis = axisOf(tag);
-            const auto cells = faceToCell0[EntityRep<1>(face, true)];
-            if (cells.size() == 0 || cells[0].index() == kRemoteCell) {
-                continue;
-            }
-            const int cart = level0.globalCell()[cells[0].index()];
-            const std::array<int,2> ij = { cart % dims0[0], (cart / dims0[0]) % dims0[1] };
-            const int line = ij[axis] + (cells[0].orientation() ? 1 : 0);
-            const int pair = ij[1 - axis];
-            auto& list = rowNodes0[{axis, line, pair}];
-            for (const int node : faceToPoint0[face]) {
-                const auto& c = corners0[node].center();
-                const std::array<double,3> p{ c[0], c[1], c[2] };
-                list.push_back({ { fractionOnRow(axis, line, pair, p), p[2] }, node });
-            }
-        }
-        // Rounding only: both sides evaluate the same lines.
-        constexpr double sameParam = 1e-9;
 
         // Map a coordinate to a leaf-pool corner (dedup; append if new).
         const auto poolCorner = [&](const std::array<double,3>& nd, const std::array<int,3>* row, double s) {
@@ -966,16 +1021,9 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             if (pit != cornerByCoord.end()) {
                 return pit->second;
             }
-            if (row != nullptr) {
-                const auto rit = rowNodes0.find(*row);
-                if (rit != rowNodes0.end()) {
-                    for (const auto& [sz, node] : rit->second) {
-                        if (std::abs(sz[0] - s) <= sameParam && std::abs(sz[1] - nd[2]) <= sameParam) {
-                            cornerByCoord.emplace(key3, node);
-                            return node;
-                        }
-                    }
-                }
+            if (const int node = (row != nullptr) ? rowNode0(*row, s, nd[2]) : -1; node >= 0) {
+                cornerByCoord.emplace(key3, node);
+                return node;
             }
             const int idx = static_cast<int>(leafCorners.size());
             leafCorners.push_back(Dune::cpgrid::Geometry<0,3>(
@@ -998,7 +1046,17 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             const std::array<int,3> row = onRow ? std::array<int,3>{ axis, conn->pillarLine, conn->pillarPair }
                                                 : std::array<int,3>{};
             for (std::size_t n = 0; n < nodes.size(); ++n) {
-                pts.push_back(poolCorner(nodes[n], onRow ? &row : nullptr, onRow ? conn->nodeS[n] : 0.0));
+                const int pt = poolCorner(nodes[n], onRow ? &row : nullptr, onRow ? conn->nodeS[n] : 0.0);
+                if (pts.empty() || pts.back() != pt) {
+                    pts.push_back(pt);
+                }
+            }
+            // Nodes of one leaf corner are one point: no zero-length edges.
+            while (pts.size() > 1 && pts.back() == pts.front()) {
+                pts.pop_back();
+            }
+            if (pts.size() < 3) {
+                return;
             }
             PolyGeom pg = polygonGeometry(nodes);
             if (pg.normal[axis] < 0.0) {
