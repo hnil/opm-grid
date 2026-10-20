@@ -62,11 +62,16 @@ struct RefinedBlockGrdecl
 /// @param zcorn       Parent ZCORN, 8*nx*ny*nz doubles.
 /// @param actnum      Parent ACTNUM (nx*ny*nz ints) or nullptr (all active).
 /// @param request     The block to refine (startIJK/endIJK within parentDims).
+/// @param lineOwner   A refined line on a parent boundary takes its pillar from the
+///                    lower column when it lies past lineOwner (default
+///                    request.startIJK). A region around a box passes the box's start
+///                    so the box's own lines come out identical.
 RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
                                const double* coord,
                                const double* zcorn,
                                const int* actnum,
-                               const BlockRefinement& request);
+                               const BlockRefinement& request,
+                               const std::array<int,3>* lineOwner = nullptr);
 
 } // namespace Refinement
 } // namespace Opm

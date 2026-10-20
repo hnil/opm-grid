@@ -44,7 +44,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            int axis,
                            int side,
                            bool edgeConformal,
-                           const std::array<std::array<int,2>,3>* across)
+                           const std::array<std::array<int,2>,3>* across,
+                           const std::array<int,3>* boxStart)
 {
     std::vector<BoundaryConnection> result;
 
@@ -158,7 +159,9 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                                       axisPositions(miniSub[1]),
                                       axisPositions(miniSub[2]) };
 
-    const RefinedBlockGrdecl refined = refineBlock(parentDims, coord, zcorn, actnum, req);
+    // The box's own lines must come out as in its level grid.
+    const RefinedBlockGrdecl refined = refineBlock(parentDims, coord, zcorn, actnum, req,
+                                                   boxStart ? boxStart : &box.startIJK);
     const std::array<int,3> mdims = refined.dims;
 
     grdecl raw;

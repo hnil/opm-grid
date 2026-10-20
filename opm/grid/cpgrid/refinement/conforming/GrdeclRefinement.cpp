@@ -63,7 +63,8 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
                                const double* coord,
                                const double* zcorn,
                                const int* actnum,
-                               const BlockRefinement& request)
+                               const BlockRefinement& request,
+                               const std::array<int,3>* lineOwner)
 {
     const auto& [nx, ny, nz] = parentDims;
     for (int c = 0; c < 3; ++c) {
@@ -105,9 +106,10 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
 
     // A line on a parent boundary inside the box belongs to the lower column, as in the
     // reference; across a fault the two columns' corners differ.
+    const auto& owner = lineOwner ? *lineOwner : request.startIJK;
     const auto pillarPos = [&](int refinedIdx, int dim) {
         auto pos = lateralPos(refinedIdx, subs[dim], request.startIJK[dim]);
-        if ((pos.frac == 0.0) && (pos.cell > request.startIJK[dim])) {
+        if ((pos.frac == 0.0) && (pos.cell > owner[dim])) {
             pos = { pos.cell - 1, 1.0 };
         }
         return pos;
