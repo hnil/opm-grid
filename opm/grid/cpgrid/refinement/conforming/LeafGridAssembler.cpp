@@ -913,12 +913,63 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             cornerByCoord[coordKey(leafCorners[c])] = c;
         }
 
+        // Level-zero nodes on each pillar row segment by (fraction s, depth): the
+        // processor puts such a node at (1-s)*P1(z) + s*P2(z), the refined grid
+        // elsewhere, so a fault split is matched by (pillar pair, s, z).
+        const auto pillarXY = [&](int i, int j, double z) {
+            const double* q = coord + 6*(static_cast<std::size_t>(j)*(dims0[0] + 1) + i);
+            const double t = (q[5] != q[2]) ? (z - q[2]) / (q[5] - q[2]) : 0.0;
+            return std::array<double,2>{ q[0] + t*(q[3] - q[0]), q[1] + t*(q[4] - q[1]) };
+        };
+        const auto fractionOnRow = [&](int axis, int line, int pair, const std::array<double,3>& p) {
+            const auto p0 = (axis == 0) ? pillarXY(line, pair, p[2]) : pillarXY(pair, line, p[2]);
+            const auto p1 = (axis == 0) ? pillarXY(line, pair + 1, p[2]) : pillarXY(pair + 1, line, p[2]);
+            const double dx = p1[0] - p0[0];
+            const double dy = p1[1] - p0[1];
+            return ((p[0] - p0[0])*dx + (p[1] - p0[1])*dy) / (dx*dx + dy*dy);
+        };
+        std::map<std::array<int,3>, std::vector<std::pair<std::array<double,2>, int>>> rowNodes0;
+        for (int face = 0; face < numFaces0; ++face) {
+            const enum face_tag tag = tags0.get(face);
+            if (tag != I_FACE && tag != J_FACE) {
+                continue;
+            }
+            const int axis = axisOf(tag);
+            const auto cells = faceToCell0[EntityRep<1>(face, true)];
+            if (cells.size() == 0 || cells[0].index() == kRemoteCell) {
+                continue;
+            }
+            const int cart = level0.globalCell()[cells[0].index()];
+            const std::array<int,2> ij = { cart % dims0[0], (cart / dims0[0]) % dims0[1] };
+            const int line = ij[axis] + (cells[0].orientation() ? 1 : 0);
+            const int pair = ij[1 - axis];
+            auto& list = rowNodes0[{axis, line, pair}];
+            for (const int node : faceToPoint0[face]) {
+                const auto& c = corners0[node].center();
+                const std::array<double,3> p{ c[0], c[1], c[2] };
+                list.push_back({ { fractionOnRow(axis, line, pair, p), p[2] }, node });
+            }
+        }
+        // Rounding only: both sides evaluate the same lines.
+        constexpr double sameParam = 1e-9;
+
         // Map a coordinate to a leaf-pool corner (dedup; append if new).
-        const auto poolCorner = [&](const std::array<double,3>& nd) {
+        const auto poolCorner = [&](const std::array<double,3>& nd, const std::array<int,3>* row, double s) {
             const std::array<double,3> key3{ nd[0], nd[1], nd[2] };
             auto pit = cornerByCoord.find(key3);
             if (pit != cornerByCoord.end()) {
                 return pit->second;
+            }
+            if (row != nullptr) {
+                const auto rit = rowNodes0.find(*row);
+                if (rit != rowNodes0.end()) {
+                    for (const auto& [sz, node] : rit->second) {
+                        if (std::abs(sz[0] - s) <= sameParam && std::abs(sz[1] - nd[2]) <= sameParam) {
+                            cornerByCoord.emplace(key3, node);
+                            return node;
+                        }
+                    }
+                }
             }
             const int idx = static_cast<int>(leafCorners.size());
             leafCorners.push_back(Dune::cpgrid::Geometry<0,3>(
@@ -933,11 +984,15 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         // pointing down-axis makes both neighbours report the opposite face of
         // themselves. The side is kept for the face_to_cell ordering below.
         const auto emitPolygon = [&](int box, int boxLeaf, int neighborLeaf, int axis, int side,
-                                     const std::vector<std::array<double,3>>& nodes) {
+                                     const std::vector<std::array<double,3>>& nodes,
+                                     const BoundaryConnection* conn = nullptr) {
             std::vector<int> pts;
             pts.reserve(nodes.size());
-            for (const auto& nd : nodes) {
-                pts.push_back(poolCorner(nd));
+            const bool onRow = conn != nullptr && conn->pillarLine >= 0;
+            const std::array<int,3> row = onRow ? std::array<int,3>{ axis, conn->pillarLine, conn->pillarPair }
+                                                : std::array<int,3>{};
+            for (std::size_t n = 0; n < nodes.size(); ++n) {
+                pts.push_back(poolCorner(nodes[n], onRow ? &row : nullptr, onRow ? conn->nodeS[n] : 0.0));
             }
             PolyGeom pg = polygonGeometry(nodes);
             if (pg.normal[axis] < 0.0) {
@@ -1116,7 +1171,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                                     conn.faceNodes});
                 }
                 else {
-                    emitPolygon(b, boxLeaf, neighborLeaf, axis, side, conn.faceNodes);
+                    emitPolygon(b, boxLeaf, neighborLeaf, axis, side, conn.faceNodes, &conn);
                 }
             }
         }
@@ -1199,7 +1254,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         }
                     }
                 }
-                emitPolygon(b, boxLeaf, neighborLeaf, axis, side, conn.faceNodes);
+                emitPolygon(b, boxLeaf, neighborLeaf, axis, side, conn.faceNodes, &conn);
             }
         }
 

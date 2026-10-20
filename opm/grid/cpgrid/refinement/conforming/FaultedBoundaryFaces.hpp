@@ -44,6 +44,12 @@ struct BoundaryConnection
                                      ///< the neighbour to a refined child cell when it
                                      ///< is itself refined (box<->box faulted interface).
     std::vector<std::array<double,3>> faceNodes; ///< face corner coordinates
+    /// For an I/J side: the face lies between parent pillars (pillarLine, pillarPair)
+    /// and (pillarLine, pillarPair + 1) along the side; nodeS[n] is node n's fraction
+    /// between them at its depth, measured on the refined pillars.
+    int pillarLine{-1};
+    int pillarPair{-1};
+    std::vector<double> nodeS;
 };
 
 /// Compute the connections at one box-boundary side using the corner-point
