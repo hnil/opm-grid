@@ -59,6 +59,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <initializer_list>
@@ -771,15 +772,21 @@ namespace cpgrid
         return loop;
     }
 
-    // Faces between the same two coarse cells (or on the same side of one at
-    // the boundary) become one face through the patch corners, keeping the
-    // outline nodes another face has as a vertex: the corner-point face.
-    // essential: nodes some cell of the result has as a corner, and fault
-    // crossings; any other node of the input is dropped from every face.
+    // Faces between the same two coarse cells (or on the same side of one at the
+    // boundary) become one face per connected piece: its outline. A piece without
+    // an outline (a hole) keeps its faces. Then only vertices stay: nodes where
+    // three or more faces of some cell meet.
     std::vector<KeptFace> collapseCoarseFaces(std::vector<KeptFace> kept,
                                               const processed_grid& output,
-                                              const std::vector<char>& essential)
+                                              std::vector<char> essential)
     {
+        // The input lists a face's two cells in either order; one order per pair,
+        // or faces between the same two blocks fall into different groups.
+        for (auto& k : kept) {
+            if (k.count == 2 && k.cells[0].index() > k.cells[1].index()) {
+                std::swap(k.cells[0], k.cells[1]);   // each keeps its orientation
+            }
+        }
         using Key = std::tuple<int,bool,int,bool,int>;
         std::map<Key, int> groupOf;
         std::vector<std::vector<int>> groups;
@@ -801,47 +808,122 @@ namespace cpgrid
             groups[it->second].push_back(static_cast<int>(f));
         }
 
-        std::vector<std::optional<std::vector<int>>> outline(groups.size());
-        const auto keep = [&essential](int n) { return essential[n] != 0; };
-        for (std::size_t g = 0; g < groups.size(); ++g) {
-            if (groups[g].size() > 1) {
-                std::vector<const KeptFace*> faces;
-                for (const int f : groups[g]) {
-                    faces.push_back(&kept[f]);
+        // Connected pieces of each group (faces sharing an edge).
+        std::vector<std::vector<int>> pieces;
+        for (const auto& group : groups) {
+            std::map<std::pair<int,int>, std::vector<int>> facesOfEdge;
+            for (const int f : group) {
+                const auto& n = kept[f].nodes;
+                for (std::size_t i = 0; i < n.size(); ++i) {
+                    const int a = n[i], b = n[(i + 1) % n.size()];
+                    facesOfEdge[{std::min(a, b), std::max(a, b)}].push_back(f);
                 }
-                outline[g] = patchOutline(faces);
             }
-            if (outline[g]) {
-                // A node on two of the patch's faces lies along a side of it; the
-                // corner-point face through the patch corners does not have it.
-                std::map<int,int> uses;
-                for (const int f : groups[g]) {
-                    for (const int n : kept[f].nodes) {
-                        ++uses[n];
-                    }
+            std::map<int,int> root;
+            for (const int f : group) {
+                root[f] = f;
+            }
+            const auto find = [&root](int f) {
+                while (root[f] != f) {
+                    f = root[f] = root[root[f]];
                 }
-                auto& nodes = *outline[g];
-                nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
-                                           [&](int n) { return uses[n] == 2 && !keep(n); }),
-                            nodes.end());
+                return f;
+            };
+            for (const auto& [e, faces] : facesOfEdge) {
+                for (std::size_t i = 1; i < faces.size(); ++i) {
+                    root[find(faces[i])] = find(faces[0]);
+                }
+            }
+            std::map<int, std::vector<int>> byRoot;
+            for (const int f : group) {
+                byRoot[find(f)].push_back(f);
+            }
+            for (auto& [r, piece] : byRoot) {
+                pieces.push_back(std::move(piece));
             }
         }
 
+        std::vector<std::optional<std::vector<int>>> outline(pieces.size());
+        for (std::size_t p = 0; p < pieces.size(); ++p) {
+            if (kept[pieces[p].front()].output == NNCFace) {
+                continue;
+            }
+            std::vector<const KeptFace*> faces;
+            for (const int f : pieces[p]) {
+                faces.push_back(&kept[f]);
+            }
+            outline[p] = (faces.size() == 1) ? std::optional(faces.front()->nodes)
+                                             : patchOutline(faces);
+        }
+
+        // On a cell's surface an edge is where two of its faces meet and a vertex
+        // where three or more do; a node only two faces of every cell have lies
+        // inside an edge (left there by a finer grid) and goes.
+        std::map<std::pair<int,int>, int> facesAt;   // (cell, node) -> faces
+        const auto count = [&facesAt](const KeptFace& k, const std::vector<int>& nodes) {
+            for (const int n : std::set<int>(nodes.begin(), nodes.end())) {
+                for (int s = 0; s < k.count; ++s) {
+                    ++facesAt[{k.cells[s].index(), n}];
+                }
+            }
+        };
+        for (std::size_t p = 0; p < pieces.size(); ++p) {
+            if (outline[p]) {
+                count(kept[pieces[p].front()], *outline[p]);
+            } else {
+                for (const int f : pieces[p]) {
+                    count(kept[f], kept[f].nodes);
+                }
+            }
+        }
+        std::fill(essential.begin(), essential.end(), 0);
+        for (const auto& [cellNode, n] : facesAt) {
+            if (n >= 3) {
+                essential[cellNode.second] = 1;
+            }
+        }
+        // A face with two vertices is a lens between two bent edges (a fault
+        // sliver); as a polygon it keeps the nodes along them.
+        for (bool changed = true; changed;) {
+            changed = false;
+            const auto lens = [&](const std::vector<int>& nodes) {
+                if (std::count_if(nodes.begin(), nodes.end(),
+                                  [&essential](int n) { return essential[n] != 0; }) < 3) {
+                    for (const int n : nodes) {
+                        changed = changed || !essential[n];
+                        essential[n] = 1;
+                    }
+                }
+            };
+            for (std::size_t p = 0; p < pieces.size(); ++p) {
+                if (outline[p]) {
+                    lens(*outline[p]);
+                } else {
+                    for (const int f : pieces[p]) {
+                        lens(kept[f].nodes);
+                    }
+                }
+            }
+        }
+
+        const auto drop = [&essential](std::vector<int>& nodes) {
+            nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
+                                       [&essential](int n) { return !essential[n]; }),
+                        nodes.end());
+        };
         std::vector<KeptFace> result;
-        result.reserve(groups.size());
-        for (std::size_t g = 0; g < groups.size(); ++g) {
-            if (!outline[g]) {
-                for (const int f : groups[g]) {
-                    auto& nodes = kept[f].nodes;
-                    nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
-                                               [&](int n) { return !keep(n); }),
-                                nodes.end());
+        result.reserve(pieces.size());
+        for (std::size_t p = 0; p < pieces.size(); ++p) {
+            if (!outline[p]) {
+                for (const int f : pieces[p]) {
+                    drop(kept[f].nodes);
                     result.push_back(std::move(kept[f]));
                 }
                 continue;
             }
-            KeptFace k = std::move(kept[groups[g].front()]);
-            k.nodes = *outline[g];
+            KeptFace k = std::move(kept[pieces[p].front()]);
+            k.nodes = *outline[p];
+            drop(k.nodes);
             result.push_back(std::move(k));
         }
         return result;

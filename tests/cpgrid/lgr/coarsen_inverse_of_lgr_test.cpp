@@ -24,6 +24,7 @@
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgpreprocess/preprocess.h>
 #include <opm/grid/cpgrid/coarsening/CornerPointCoarsening.hpp>
+#include <opm/grid/cpgrid/GeometricCheck.hpp>
 #include <opm/grid/cpgrid/refinement/conforming/ConformingBlockBuilder.hpp>
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
 
@@ -258,6 +259,31 @@ Dune::CpGrid refined(const Grdecl& fine, int factor,
     grid.addLgrsUpdateLeafView(perDim, lo, hi, names);
     return grid;
 }
+
+// A fault on the pillar line x = 2*dx: columns i >= 2 move down by throw0 + slope*J at
+// pillar row J, so the throw varies along the fault and nowhere else.
+Grdecl faultedGrid(int n, double dx, double dz, double throw0, double slope)
+{
+    auto g = uniformGrid(n, dx, dz);
+    for (int k = 0; k < 2*n; ++k) {
+        for (int j = 0; j < 2*n; ++j) {
+            for (int i = 4; i < 2*n; ++i) {
+                g.zcorn[i + 2ull*n*(j + 2ull*n*k)] += throw0 + slope*((j + 1)/2);
+            }
+        }
+    }
+    return g;
+}
+
+Dune::CpGrid coarsened(const Grdecl& fine, const std::vector<CoarsenRequest>& requests,
+                       bool collapse)
+{
+    const auto layout = Opm::Coarsening::blockLayout(fine.dims, requests);
+    Dune::CpGrid grid;
+    grid.processEclipseFormatCoarsened(view(fine), layout.blockOfCartesian, layout.boxes,
+                                       /*edge_conformal*/ true, collapse);
+    return grid;
+}
 } // namespace
 
 // 6^3 fine cells, factor 2: the coarse grid is 3^3 and the box its centre cell.
@@ -432,4 +458,49 @@ BOOST_AUTO_TEST_CASE(MergedLayersBesideFineColumns)
     BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
     BOOST_CHECK_EQUAL(hangingNodes(grid), 0);
     checkSame(shape(collapsed), shape(grid));
+}
+
+// Blocks meeting across a fault: the collapse must stay a closed, conforming body, with
+// the merge's cells (which keep all fine faces) where no block straddles the fault.
+BOOST_AUTO_TEST_CASE(CollapseAcrossFaults)
+{
+    const int n = 4;
+    struct Case { const char* name; double throw0, slope; std::vector<CoarsenRequest> requests;
+                  bool exact; };
+    CoarsenRequest all;
+    all.endIJK = {n, n, n};
+    all.cellsPerDim = {2, 2, 2};
+    CoarsenRequest left;
+    left.endIJK = {2, n, n};
+    left.cellsPerDim = {1, 2, 2};
+    CoarsenRequest shifted;      // the fault runs through the middle of a block
+    shifted.startIJK = {1, 0, 0};
+    shifted.endIJK = {3, n, n};
+    shifted.cellsPerDim = {1, 2, 2};
+    const std::vector<Case> cases = {
+        {"tiny throw", 0.025, 0.0, {all}, true},
+        {"one layer", 10.0, 0.0, {all}, true},
+        {"one and a half layers", 15.0, 0.0, {all}, true},
+        {"varying throw", 2.0, 3.0, {all}, true},
+        {"varying throw, fine side", 2.0, 3.0, {left}, true},
+        // A block across the fault is flattened over the throw: valid, not exact.
+        {"varying throw, fault in a block", 2.0, 3.0, {shifted}, false},
+    };
+    for (const auto& c : cases) {
+        BOOST_TEST_CONTEXT(c.name) {
+            const auto fine = faultedGrid(n, 100.0, 10.0, c.throw0, c.slope);
+            const auto collapsed = coarsened(fine, c.requests, true);
+            const auto merged = coarsened(fine, c.requests, false);
+            const auto check = Dune::cpgrid::checkGeometric(collapsed);
+            BOOST_CHECK_MESSAGE(check.ok(), check.summary());
+            BOOST_CHECK_EQUAL(hangingNodes(collapsed), 0);
+            // Both number the cells by block.
+            BOOST_REQUIRE_EQUAL(collapsed.size(0), merged.size(0));
+            if (c.exact) {
+                for (int cell = 0; cell < collapsed.size(0); ++cell) {
+                    BOOST_CHECK_CLOSE(collapsed.cellVolume(cell), merged.cellVolume(cell), 1e-8);
+                }
+            }
+        }
+    }
 }
