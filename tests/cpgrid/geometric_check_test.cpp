@@ -228,6 +228,25 @@ BOOST_AUTO_TEST_CASE(FaultWithCrossingLayers)
     BOOST_CHECK(conformal.ok());
 }
 
+// Field coordinates (~1e5 m) must not make small cells look open.
+BOOST_AUTO_TEST_CASE(TranslatedSmallCellsAreGeometric)
+{
+    for (const double offset : {0.0, 1.0e5}) {
+        auto g = uniformGrid();
+        for (std::size_t p = 0; p < g.coord.size(); p += 3) {
+            g.coord[p] = offset + 0.1*g.coord[p];
+            g.coord[p + 1] = offset + 0.1*g.coord[p + 1];
+            g.coord[p + 2] = 2000.0 + 0.1*g.coord[p + 2];
+        }
+        for (auto& zc : g.zcorn) {
+            zc = 2000.0 + 0.1*zc;
+        }
+        const auto check = processed(g, true);
+        BOOST_TEST_INFO("offset " << offset << ": " << check.summary());
+        BOOST_CHECK(check.ok());
+    }
+}
+
 #if HAVE_OPM_COMMON
 // Layer 2 pinches out to the west: 0.1 m thick on average in column 0 (removed
 // by PINCH 0.5) but 2.6 m in column 1, whose west corners are only 0.2 m apart.
