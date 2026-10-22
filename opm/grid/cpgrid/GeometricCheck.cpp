@@ -59,9 +59,12 @@ OrientedFace orientedFace(const CpGrid& grid, int face)
     for (int v = 0; v < n; ++v) {
         out.nodes[v] = grid.faceVertex(face, v);
     }
+    // About the first node: the same vector, with round-off at face scale rather
+    // than at the scale of the coordinates.
+    const Point origin = n > 0 ? grid.vertexPosition(out.nodes[0]) : Point(0.0);
     for (int v = 0; v < n; ++v) {
-        const auto& p = grid.vertexPosition(out.nodes[v]);
-        const auto& q = grid.vertexPosition(out.nodes[(v + 1) % n]);
+        const Point p = grid.vertexPosition(out.nodes[v]) - origin;
+        const Point q = grid.vertexPosition(out.nodes[(v + 1) % n]) - origin;
         out.area[0] += 0.5*(p[1]*q[2] - p[2]*q[1]);
         out.area[1] += 0.5*(p[2]*q[0] - p[0]*q[2]);
         out.area[2] += 0.5*(p[0]*q[1] - p[1]*q[0]);
